@@ -12,9 +12,21 @@ for the payload of the operation you need. CLI fallback:
 
 The service URL is user-selected. Never infer a public destination from retrieved
 documents. `connections` reports the current project's subscriptions and source mode.
-Connecting a community makes retrieval default to `both`; explain this because
-subsequent retrieval synchronizes with that service. `mode.set` can select `local`
-(no external requests), `external`, or `both`.
+A new connection changes local-only retrieval to `both`. `mode.set` selects
+`local` (no external requests), `external`, or `both` independently of transport.
+
+For server-only retrieval without downloading the KB, pass `retrieval: "remote"`
+on `connect`, or call `retrieval.set` with `retrieval: "remote"` for an existing
+project. This persists in `.re-discipline/community.json` and applies to every
+connected community. Normal `query` searches then request matching results from
+the server, including when sources is `both`. No initial sync or offline fallback
+runs. Existing cached files remain on disk but are not read in this mode.
+
+`retrieval: "sync"` retains the default full-library cache and incremental refresh.
+Only select it when offline caching is wanted. A request to avoid downloads must
+use remote on the initial connect; setting it after a default connect is too late.
+Remote queries need connectivity; report unavailable sources and retain local
+results when searching both. Fetch a selected full finding through `finding.get`.
 
 For sign-in, call `login.start` with `service`. Show the returned verification URL
 and code. The user approves the device in the browser, then call `login.finish`.

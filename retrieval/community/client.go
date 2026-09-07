@@ -128,6 +128,7 @@ type Connection struct {
 	Name        string `json:"name"`
 }
 type Settings struct {
+	Retrieval   string       `json:"retrieval"`
 	Mode        string       `json:"mode"`
 	Connections []Connection `json:"connections"`
 	Exclude     []string     `json:"exclude"`
@@ -138,17 +139,29 @@ func LoadSettings(root string) (Settings, error) {
 	var s Settings
 	b, err := os.ReadFile(SettingsPath(root))
 	if os.IsNotExist(err) {
-		return Settings{Mode: "local", Connections: []Connection{}, Exclude: []string{}}, nil
+		return Settings{Retrieval: "sync", Mode: "local", Connections: []Connection{}, Exclude: []string{}}, nil
 	}
 	if err != nil {
 		return s, err
 	}
 	err = json.Unmarshal(b, &s)
+	if err == nil {
+		err = validateRetrieval(s.Retrieval)
+	}
+	if s.Retrieval == "" {
+		s.Retrieval = "sync"
+	}
 	return s, err
 }
 func SaveSettings(root string, s Settings) error {
 	if s.Mode != "local" && s.Mode != "external" && s.Mode != "both" {
 		return fmt.Errorf("mode must be local, external, or both")
+	}
+	if err := validateRetrieval(s.Retrieval); err != nil {
+		return err
+	}
+	if s.Retrieval == "" {
+		s.Retrieval = "sync"
 	}
 	return atomicJSON(SettingsPath(root), s)
 }

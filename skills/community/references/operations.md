@@ -10,10 +10,11 @@ Local client actions:
 |---|---|
 | `connections` | none |
 | `login.start`, `login.finish`, `logout` | `service` |
-| `connect` | `service`, `community`, optional new `alias` |
+| `connect` | `service`, `community`, optional new `alias`, optional `retrieval`: remote or sync; remote avoids the initial KB download and persists project-wide |
 | `disconnect` | `alias`; retains the downloaded cache |
 | `mode.set` | `mode`: local, external, both |
-| `sync` | `alias`; read-only synchronization, no draft publication |
+| `retrieval.set` | `retrieval`: remote (server search, no KB cache) or sync (full offline cache); independent of source mode, persisted per project |
+| `sync` | `alias`; downloads accepted knowledge, no draft publication; blocked in remote retrieval mode |
 | `dashboard` | `alias` or `service`; returns a URL to open |
 | `publish.prepare` | `alias`, `path`: docs/...md, `build` |
 | `publish.preview`, `publish.queue` | `draft_id` |

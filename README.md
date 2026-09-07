@@ -62,6 +62,16 @@ adds shared libraries to local retrieval. Its backend lives in the separate
 [community repository](https://github.com/adiazpar/re-discipline-community).
 The plugin remains usable without an account or network connection.
 
+For live community search without downloading the KB, tell your agent:
+"Connect to this community with server-only retrieval and search both local and
+community knowledge." The agent passes `retrieval: "remote"` on `connect`, or
+uses `retrieval.set` for an existing connection. This preference is stored in
+`.re-discipline/community.json`, separately from `mode: local|external|both`.
+Remote mode returns only matching results and needs connectivity; it never
+synchronizes the whole library or falls back to cached community content.
+`retrieval: "sync"` is the backward-compatible default for offline caching.
+
+
 - `/re-discipline:community` — sign in, create or connect a library, invite
   collaborators, and choose local, external, or combined retrieval.
 - `/re-discipline:publish` — prepare selected portable findings from `docs/`,

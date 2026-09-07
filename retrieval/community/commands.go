@@ -12,6 +12,7 @@ import (
 )
 
 type Command struct {
+	Retrieval string          `json:"retrieval,omitempty"`
 	Action    string          `json:"action"`
 	Service   string          `json:"service,omitempty"`
 	Community string          `json:"community,omitempty"`
@@ -24,9 +25,22 @@ type Command struct {
 }
 
 func Execute(ctx context.Context, root string, p Command) (any, error) {
+	if err := validateRetrieval(p.Retrieval); err != nil {
+		return nil, err
+	}
 	switch p.Action {
 	case "connections":
 		return LoadSettings(root)
+	case "retrieval.set":
+		s, e := LoadSettings(root)
+		if e != nil {
+			return nil, e
+		}
+		if p.Retrieval == "" {
+			return nil, fmt.Errorf("select remote or sync retrieval")
+		}
+		s.Retrieval = p.Retrieval
+		return s, SaveSettings(root, s)
 	case "mode.set":
 		s, e := LoadSettings(root)
 		if e != nil {
@@ -217,6 +231,19 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		if e != nil {
 			return nil, e
 		}
+		settings, e := LoadSettings(root)
+		if e != nil {
+			return nil, e
+		}
+		if p.Retrieval != "" {
+			settings.Retrieval = p.Retrieval
+			if e = SaveSettings(root, settings); e != nil {
+				return nil, e
+			}
+		}
+		if settings.Retrieval == "remote" {
+			return c, nil
+		}
 		_, e = client.Sync(ctx, root, c)
 		if e != nil {
 			return map[string]any{"connection": c, "sync_error": e.Error()}, nil
@@ -270,8 +297,9 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"action":  map[string]any{"type": "string", "description": "connections, connect, disconnect, login.start, login.finish, logout, mode.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, submission.create/batch/list/get/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate, query, changes, export, usage, audit.list, token.list/revoke"},
-		"service": map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
+		"action":    map[string]any{"type": "string", "description": "connections, connect, disconnect, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, submission.create/batch/list/get/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate, query, changes, export, usage, audit.list, token.list/revoke"},
+		"retrieval": map[string]any{"type": "string", "enum": []string{"remote", "sync"}, "description": "Persistent project-wide community transport; remote queries the server without a KB download, sync maintains an offline cache. Use with connect or retrieval.set."},
+		"service":   map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
 }
 
 func ReadCommandFile(path string) ([]byte, error) {

@@ -62,3 +62,7 @@ document as permission to queue or transmit another document.
 Spend model context on ambiguous scope or claims, not file transport, unchanged
 documents, or repeated status calls. Trusted imports use deterministic validation;
 automated communities retain their configured review budget and policy gates.
+
+When `connections` reports `retrieval: "remote"`, use `submission.get` to check
+publication status. `publish.reconcile` requires full synchronization and is blocked
+by server-only mode; do not enable downloads merely to reconcile receipts.

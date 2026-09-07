@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1 - 2026-09-07
+
+Adds persistent server-only community retrieval. Select remote transport when
+connecting or through retrieval.set to search without downloading the library.
+Local and remote sources can be combined. Offline synchronization remains an
+independent option, with existing projects preserving their current behavior.
+
 ## 1.7.0 - 2026-09-07
 
 Adds resumable batch publication, bounded import allowances, included evidence,

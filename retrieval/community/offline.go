@@ -50,6 +50,14 @@ func meta(db *sql.DB, key string) string {
 	return s
 }
 func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, error) {
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return nil, err
+	}
+	if settings.Retrieval == "remote" {
+		return nil, fmt.Errorf("server-only retrieval disables KB downloads; explicitly select retrieval.set sync to enable an offline cache")
+	}
+
 	if err := os.MkdirAll(filepath.Join(cacheRoot(root, conn), ".re-discipline"), 0700); err != nil {
 		return nil, err
 	}
@@ -309,6 +317,23 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 	}
 	if mode != "local" {
 		for _, conn := range s.Connections {
+			if s.Retrieval == "remote" {
+				source := map[string]any{"source": conn.Alias, "retrieval": "remote", "cached": false, "available": false}
+				if offline {
+					out.Warnings = append(out.Warnings, conn.Alias+": server-only retrieval is unavailable offline")
+				} else {
+					remote, e := RemoteQuery(ctx, conn, q, opts)
+					if e != nil {
+						out.Warnings = append(out.Warnings, conn.Alias+": "+e.Error())
+					} else {
+						source["available"] = true
+						out.Hits = append(out.Hits, remote.Hits...)
+						out.Warnings = append(out.Warnings, remote.Warnings...)
+					}
+				}
+				out.Sources = append(out.Sources, source)
+				continue
+			}
 			if !offline {
 				client, e := NewClient(conn.Service)
 				if e != nil {
