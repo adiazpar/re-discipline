@@ -3,3 +3,4 @@ __pycache__/
 *.py[cod]
 .claude/settings.local.json
 .claude/idea-hunt-history.jsonl
+.codex/config.toml

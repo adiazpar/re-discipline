@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
-  "version": "1.5.0",
-  "description": "Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool.",
+  "version": "1.6.0",
+  "description": "Evidence-based reverse-engineering knowledge: local retrieval, shared community libraries, offline search, and reviewed publication.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -18,14 +18,17 @@
   "mcpServers": {
     "re-search": {
       "command": "bin/re-search.exe",
-      "args": ["serve", "--mcp"],
+      "args": [
+        "serve",
+        "--mcp"
+      ],
       "cwd": "."
     }
   },
   "interface": {
     "displayName": "Re-Discipline",
     "shortDescription": "Curated RE knowledge: search it, campaign it, promote findings.",
-    "longDescription": "Markdown-canonical reverse-engineering knowledge base in .re-discipline/: search curated docs with the re-search query tool before investigating, work in campaign folders (reports + candidate findings), and promote reviewed findings into docs/.",
+    "longDescription": "Curate reverse-engineering findings in .re-discipline/docs/, search local and connected community libraries, and carry accepted knowledge offline. Create communities, invite collaborators, publish selected portable findings, and review contributions through your agent or the optional dashboard.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [

@@ -1,11 +1,18 @@
 {
   "name": "re-discipline",
-  "version": "1.5.0",
-  "description": "Markdown-canonical reverse-engineering knowledge: campaign curation conventions plus the re-search retrieval CLI/MCP tool.",
+  "version": "1.6.0",
+  "description": "Evidence-based reverse-engineering knowledge: local retrieval, shared community libraries, offline search, and reviewed publication.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
   },
-  "keywords": ["research", "knowledge-management", "campaigns", "evidence", "retrieval", "workflow"],
+  "keywords": [
+    "research",
+    "knowledge-management",
+    "campaigns",
+    "evidence",
+    "retrieval",
+    "workflow"
+  ],
   "mcpServers": "./.mcp.json"
 }

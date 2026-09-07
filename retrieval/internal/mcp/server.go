@@ -18,6 +18,13 @@ type QueryFunc func(query string, opts search.QueryOptions) (string, error)
 // SymbolFunc resolves one symbol name with formatted text.
 type SymbolFunc func(name string, limit int) (string, error)
 
+type Extension struct {
+	Name        string
+	Description string
+	Schema      map[string]any
+	Call        func(json.RawMessage) (string, error)
+}
+
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -38,7 +45,7 @@ type rpcError struct {
 }
 
 // Serve reads newline-delimited JSON-RPC requests from in until EOF.
-func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol SymbolFunc) error {
+func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol SymbolFunc, extensions ...Extension) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 	enc := json.NewEncoder(out)
@@ -76,10 +83,12 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"query": map[string]any{"type": "string", "description": "natural-language question or identifier"},
-						"limit": map[string]any{"type": "integer", "description": "max results (default 8)"},
-						"kind":  map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
-						"grade": map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
+						"query":   map[string]any{"type": "string", "description": "natural-language question or identifier"},
+						"limit":   map[string]any{"type": "integer", "description": "max results (default 8)"},
+						"kind":    map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
+						"grade":   map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
+						"sources": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}},
+						"offline": map[string]any{"type": "boolean", "description": "Use cached community knowledge without network requests"},
 					},
 					"required": []string{"query"},
 				},
@@ -95,31 +104,54 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 					"required": []string{"name"},
 				},
 			}}}
+			listed := resp.Result.(map[string]any)
+			for _, ext := range extensions {
+				listed["tools"] = append(listed["tools"].([]map[string]any), map[string]any{"name": ext.Name, "description": ext.Description, "inputSchema": ext.Schema})
+			}
 		case "tools/call":
 			var p struct {
 				Name      string `json:"name"`
 				Arguments struct {
-					Query string `json:"query"`
-					Name  string `json:"name"`
-					Limit int    `json:"limit"`
-					Kind  string `json:"kind"`
-					Grade string `json:"grade"`
+					Query   string `json:"query"`
+					Name    string `json:"name"`
+					Limit   int    `json:"limit"`
+					Kind    string `json:"kind"`
+					Grade   string `json:"grade"`
+					Sources string `json:"sources"`
+					Offline bool   `json:"offline"`
 				} `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
+			var generic struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			json.Unmarshal(req.Params, &generic)
 			var text string
 			var err error
 			switch p.Name {
 			case "query":
 				text, err = query(p.Arguments.Query, search.QueryOptions{
-					Limit: p.Arguments.Limit,
-					Kind:  p.Arguments.Kind,
-					Grade: p.Arguments.Grade,
+					Limit:   p.Arguments.Limit,
+					Kind:    p.Arguments.Kind,
+					Grade:   p.Arguments.Grade,
+					Sources: p.Arguments.Sources,
+					Offline: p.Arguments.Offline,
 				})
 			case "symbol":
 				text, err = symbol(p.Arguments.Name, p.Arguments.Limit)
 			default:
-				resp.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
+				found := false
+				for _, ext := range extensions {
+					if ext.Name == p.Name {
+						found = true
+						text, err = ext.Call(generic.Arguments)
+						break
+					}
+				}
+				if !found {
+					resp.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
+				}
 			}
 			if resp.Error != nil {
 				break

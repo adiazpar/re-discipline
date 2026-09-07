@@ -24,9 +24,11 @@ type Hit struct {
 // QueryOptions carries optional constraints for QueryOpts. The zero
 // value means "current default behavior": limit 8, no filtering.
 type QueryOptions struct {
-	Limit int    // <= 0 means 8
-	Kind  string // filter to this kind (fact|ops|reference); empty = no filter
-	Grade string // filter to this grade (direct|inferred|reported); empty = no filter
+	Sources string // local, external, or both; consumed by the community client
+	Offline bool   // avoid remote requests; consumed by the community client
+	Limit   int    // <= 0 means 8
+	Kind    string // filter to this kind (fact|ops|reference); empty = no filter
+	Grade   string // filter to this grade (direct|inferred|reported); empty = no filter
 }
 
 // BM25 column weights for the three indexed columns (title, body,

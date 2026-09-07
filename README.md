@@ -1,4 +1,4 @@
-# re-discipline 1.3
+# re-discipline
 
 An evidence-disciplined reverse-engineering knowledge system for Claude
 Code, Codex, and any MCP-capable agent. Two halves:
@@ -54,6 +54,36 @@ for 1.x upgrades.
   skill / `.re-discipline/CONVENTIONS.md`).
 - `/re-discipline:close-campaign` — promote, summarize, archive.
 - Wrong doc later? Edit it, mark `superseded`, link the replacement.
+
+## Community knowledge
+
+The optional [community service](https://re-discipline-community.onrender.com)
+adds shared libraries to local retrieval. Its backend lives in the separate
+[community repository](https://github.com/adiazpar/re-discipline-community).
+The plugin remains usable without an account or network connection.
+
+- `/re-discipline:community` — sign in, create or connect a library, invite
+  collaborators, and choose local, external, or combined retrieval.
+- `/re-discipline:publish` — prepare selected portable findings from `docs/`,
+  review the package, and explicitly submit it. Operational and local environment
+  material is excluded; the service enforces permissions and acceptance policy.
+- `/re-discipline:review` — inspect and accept or return contributions.
+- `/re-discipline:sync` — download accepted revisions for offline search.
+- `/re-discipline:dashboard` — open the optional visual management interface.
+
+Use GitHub sign-in once and approve the plugin's device code. Credentials stay in
+the operating system credential store. Each project records its chosen libraries
+and disposable caches in gitignored `.re-discipline/community*` paths. Connecting
+does not upload local documents, and synchronizing does not flush queued drafts.
+
+```powershell
+.re-discipline/bin/re-search.exe query --sources both --offline "timescale"
+```
+
+See [community operations](skills/community/references/operations.md) for the
+JSON interface exposed by the CLI and the `community` MCP tool. Private content
+already downloaded can remain readable offline until the client reconnects and
+learns of a revocation; access revocation cannot erase previously copied content.
 
 ## Symbol lookup
 

@@ -3,3 +3,5 @@ index.lock
 index.tmp-*.db
 index.db.build
 bin/
+community/
+community.json
