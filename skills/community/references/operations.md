@@ -17,8 +17,14 @@ Local client actions:
 | `dashboard` | `alias` or `service`; returns a URL to open |
 | `publish.prepare` | `alias`, `path`: docs/...md, `build` |
 | `publish.preview`, `publish.queue` | `draft_id` |
+| `publish.revise` | `draft_id`; creates a linked editable version of a finalized or definitively invalid draft. Resolve in-flight transfers with their original keys first. |
 | `publish.update` | `draft_id`, `data`: complete replacement document; unqueued drafts only |
 | `publish.list`, `publish.flush` | none; flush sends all queued drafts to their recorded destinations |
+| `publish.batch.prepare` | `alias`, optional `build` override, `data:{paths:["docs/...md"]}`; returns compact per-path preflight |
+| `publish.batch.queue`, `publish.batch.export` | optional `alias`, `data:{draft_ids:[UUID]}`; export queued drafts for one destination |
+| `publish.batch.flush` | `alias`, optional `data:{import_grant:UUID}`; compact resumable batch transfer |
+| `publish.reconcile` | `alias`; sync and verify accepted receipts; legacy adoption optionally takes `data:{sources:[{draft_id,source_digest}]}` with original SHA256 hashes |
+| `publish.evidence` | `draft_id`, `data:{path,label,start,end}`; explicitly selected project text range, 1–1000 lines, at most 64 KiB excerpt |
 
 Service actions and their `data` payloads:
 
@@ -36,10 +42,16 @@ Service actions and their `data` payloads:
 | `invite.revoke` | `{id}`; permanently deletes the invitation |
 | `invite.redeem` | `{token}`; service only, community not required |
 | `submission.create` | `{idempotency_key:<UUID>,document:<below>}`; prefer the local draft pipeline |
+| `submission.batch` | `{items:[{idempotency_key,document}],import_grant?:UUID}`; at most 50 items and 2 MiB request; independent outcomes, safe retries |
+| `import.create` | owner only: `{user_id?:UUID,count,bytes,hours}`; trusted publisher, 1–24 hours, bounded by community storage/count caps |
+| `import.list`, `import.revoke` | `{}` or `{id}`; allowances are scoped to one community and publisher |
 | `submission.list` | `{state?}`; contributor sees own submissions, maintainers see the queue |
 | `submission.get` | `{id}` |
 | `submission.review` | `{id,digest,policy_version,decision,rationale}`; decision accept, reject, request_changes |
 | `finding.get`, `finding.history` | `{id}` |
+| `finding.candidates` | `{document}`; deterministic topic suggestions, no model calls or automatic merging |
+| `finding.relations` | `{id?:UUID}`; accepted revision comparisons; `current:false` means an endpoint changed |
+| `finding.relate` | maintainer/owner: `{source_id,target_id,source_revision,target_revision,kind,rationale}`; kind equivalent, related, conflicting, separate. Equivalent uses target as canonical and preserves both contributions. Separate removes this directed relationship. |
 | `finding.withdraw` | `{id,revision,reason}`; permanently erases finding content, submissions, reviews, and server caches; retains content-free sync markers |
 | `query` | `{query,limit?,kind?,grade?}` |
 | `changes`, `export` | `{since:0,through:0,limit:200}`; follow `more`, pin through from first page |
@@ -73,3 +85,11 @@ Do not replace a published revision blindly: refresh and reconcile a conflict.
 State progression: local draft → locally queued → server queued → accepted,
 needs_review, changes_requested, rejected, or conflict. Accepted content alone
 enters community search. A changed document requires a new submission UUID.
+
+`both` retrieval collapses byte-equivalent local/community versions only through
+verified publication receipts, keeping all `locations`. Confirmed equivalent
+contributor claims have expandable `contributions`; evidence lineages are distinct.
+Changed source files, different remote revisions, and stale comparisons remain
+visible. Similar titles alone never suppress results. A renamed file retains its
+local identity when the unchanged source hash identifies one disappeared path;
+copies and ambiguous moves do not silently inherit another finding's identity.

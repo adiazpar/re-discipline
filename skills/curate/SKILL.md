@@ -39,13 +39,19 @@ moment never comes back.
   decompilation/memory; deductions are `inferred`; external docs are
   `reported`. Do not state hypotheses as facts.
 - Negative results are findings too: "X does not work, because Y."
+- Write portable findings at discovery time: identify the build and modifications,
+  state the claim's limits, and include a short `## Supporting evidence` section
+  with the selected observation, signature, or excerpt. Keep full traces and local
+  reproduction setup in the report. Use `build:` frontmatter for applicability;
+  explicitly distinguish unknown build information from measured conditions.
+  A portable document remains local until publication is authorized.
 - Do NOT put findings into `docs/` — promotion is the manager's job.
 
 ## If you are the manager promoting
 
 Skim each candidate (atomic? evidence cited? grade matches evidence?),
-search `docs/` for duplicates first, resolve conflicts (higher grade
-wins, or record both), set `status: promoted`, move into `docs/`, run
+search `docs/` for duplicates first, reconcile applicability and evidence
+(a higher grade does not erase a contradictory observation), set `status: promoted`, move into `docs/`, run
 `.re-discipline/bin/re-search.exe index`. You review claims — you never
 re-derive reports.
 

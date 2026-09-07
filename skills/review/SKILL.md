@@ -17,6 +17,15 @@ For updates, read the current finding and explain the material change. Evidence
 grade and community acceptance are separate: never upgrade a claim merely because
 another agent accepted it. Unavailable evidence remains unavailable.
 
+Use `finding.candidates` to narrow comparisons without model review of every
+document. Topic or title overlap alone is insufficient for consolidation. Two
+contributors may independently establish the same claim with different evidence;
+preserve both authors and evidence sets. After acceptance, an authorized maintainer
+can use `finding.relate` to record equivalent, related, or conflicting revisions.
+Equivalence selects a canonical target for grouped retrieval; it does not erase
+the other contribution. Compare applicability and both exact revisions first.
+A changed endpoint makes the relationship stale until reviewed again.
+
 Use `submission.review` with a concise rationale and the actual digest and policy
 version. Accept only within the user's delegated review authority. Request changes
 for fixable scope/evidence problems; reject an unsuitable contribution. The service

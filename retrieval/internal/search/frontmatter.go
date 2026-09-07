@@ -7,6 +7,7 @@ import (
 
 // Doc is one parsed markdown document from .re-discipline/docs/.
 type Doc struct {
+	Build    string // optional explicit applicability for portable publication
 	Path     string // relative to .re-discipline/, forward slashes
 	Title    string
 	Body     string
@@ -56,6 +57,8 @@ func parseFrontmatter(fm string, d *Doc) {
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 		switch key {
+		case "build":
+			d.Build = val
 		case "status":
 			d.Status = val
 		case "kind":

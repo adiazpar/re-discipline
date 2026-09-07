@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/adiazpar/re-discipline/retrieval/engine"
 	"net/url"
 	"path"
 	"regexp"
@@ -74,6 +75,7 @@ type Check struct {
 	Blocking bool   `json:"blocking"`
 }
 type Change struct {
+	Author    string   `json:"author,omitempty"`
 	Sequence  int64    `json:"sequence"`
 	FindingID string   `json:"finding_id"`
 	Revision  string   `json:"revision"`
@@ -93,13 +95,30 @@ func Digest(d Document) string {
 	return hex.EncodeToString(sum[:])
 }
 
-var localPath = regexp.MustCompile(`(?i)([a-z]:[\\/]|\\\\[a-z0-9]|/Users/|/home/|localhost|127\.0\.0\.1|\[::1\])`)
+var localPath = regexp.MustCompile(`(?i)(\b[a-z]:[\\/]|\\\\[a-z0-9]|/Users/|/home/|\blocalhost\b|127\.0\.0\.1|\[::1\])`)
 var secret = regexp.MustCompile(`(?i)(-----BEGIN .*PRIVATE KEY-----|\b(?:sk-proj-|ghp_|github_pat_)[a-z0-9_-]{12,}|\b(?:api[_-]?key|password|access[_-]?token)\s*[:=]\s*["']?[a-z0-9_+/=-]{16,})`)
 
 // Validate is a deterministic portability gate. Semantic scope review is separate.
 func Validate(d Document) []Check {
 	c := []Check{}
 	add := func(code, msg string) { c = append(c, Check{code, msg, true}) }
+	parsed := engine.Parse(d.SourcePath, d.Markdown)
+	if parsed.Status != "promoted" {
+		add("promotion", "Only locally promoted findings may be submitted.")
+	}
+	if parsed.Kind != "" && parsed.Kind != d.Kind {
+		add("kind_mismatch", "Markdown kind differs from publication metadata.")
+	}
+	if parsed.Grade != "" && parsed.Grade != d.Grade {
+		add("grade_mismatch", "Markdown grade differs from publication metadata.")
+	}
+	for _, line := range strings.Split(d.Markdown, "\n") {
+		v := strings.ToLower(strings.TrimSpace(line))
+		if v == "publish: false" || v == "audience: local" || v == "visibility: private" {
+			add("private_marker", "Document explicitly excludes publication.")
+			break
+		}
+	}
 	p := strings.ToLower(strings.ReplaceAll(d.SourcePath, "\\", "/"))
 	if !strings.HasPrefix(p, "docs/") || path.Clean(p) != p || p == "docs/index.md" || strings.HasPrefix(p, "docs/ops/") || !strings.HasSuffix(p, ".md") {
 		add("source_path", "Select a Markdown finding under docs/, excluding ops and index files.")
@@ -116,11 +135,17 @@ func Validate(d Document) []Check {
 	if len(d.Markdown) < 10 || len(d.Markdown) > 256*1024 {
 		add("size", "Finding must contain 10 to 262144 bytes.")
 	}
-	b, _ := json.Marshal(d)
-	if localPath.Match(b) {
+	// Inspect actual fields, not JSON escapes: a newline after "Notes:" and
+	// the final "s:/" in an HTTPS URL are not Windows paths.
+	fields := []string{d.SourcePath, d.Markdown, d.Build, d.Kind, d.Grade, d.Supersedes}
+	for _, e := range d.Evidence {
+		fields = append(fields, e.Label, e.URL, e.Excerpt)
+	}
+	material := strings.Join(fields, "\n")
+	if localPath.MatchString(material) {
 		add("local_environment", "Remove machine paths and local service addresses from the publication draft.")
 	}
-	if secret.Match(b) {
+	if secret.MatchString(material) {
 		add("secret", "Remove credential-like material from the publication draft.")
 	}
 	if len(d.Evidence) == 0 || len(d.Evidence) > 30 {

@@ -36,10 +36,75 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return s, SaveSettings(root, s)
 	case "publish.preview":
 		return ReadDraft(root, p.DraftID)
+	case "publish.revise":
+		return Revise(ctx, root, p.DraftID)
 	case "publish.queue":
 		return Queue(root, p.DraftID)
 	case "publish.flush":
 		return Flush(ctx, root)
+	case "publish.batch.flush":
+		var v struct {
+			ImportGrant string `json:"import_grant"`
+		}
+		if len(p.Data) > 0 {
+			if e := json.Unmarshal(p.Data, &v); e != nil {
+				return nil, e
+			}
+		}
+		if v.ImportGrant != "" && p.Alias == "" {
+			return nil, fmt.Errorf("an import allowance requires one explicit alias")
+		}
+		return FlushBatch(ctx, root, p.Alias, v.ImportGrant)
+	case "publish.batch.queue", "publish.batch.export":
+		var v struct {
+			DraftIDs []string `json:"draft_ids"`
+		}
+		if e := json.Unmarshal(p.Data, &v); e != nil {
+			return nil, e
+		}
+		if len(v.DraftIDs) == 0 || len(v.DraftIDs) > 20000 {
+			return nil, fmt.Errorf("select 1 to 20000 draft IDs")
+		}
+		items := []BatchItem{}
+		issues := []map[string]string{}
+		destination := ""
+		for _, id := range v.DraftIDs {
+			d, e := ReadDraft(root, id)
+			if e == nil && p.Alias != "" && d.Connection.Alias != p.Alias {
+				e = fmt.Errorf("draft belongs to another destination")
+			}
+			if e == nil && p.Action == "publish.batch.queue" {
+				d, e = Queue(root, id)
+			}
+			if e != nil {
+				issues = append(issues, map[string]string{"draft_id": id, "error": e.Error()})
+				continue
+			}
+			key := d.Connection.Service + "/" + d.Connection.CommunityID
+			if destination != "" && destination != key {
+				return nil, fmt.Errorf("export one community at a time")
+			}
+			destination = key
+			if p.Action == "publish.batch.export" {
+				if d.State != "queued" {
+					issues = append(issues, map[string]string{"draft_id": id, "error": "preview and queue this draft before export"})
+					continue
+				}
+				items = append(items, BatchItem{Key: d.ID, Document: d.Document})
+			}
+		}
+		return map[string]any{"items": items, "issues": issues, "destination": destination}, nil
+	case "publish.evidence":
+		var v struct {
+			Path  string `json:"path"`
+			Label string `json:"label"`
+			Start int    `json:"start"`
+			End   int    `json:"end"`
+		}
+		if e := json.Unmarshal(p.Data, &v); e != nil {
+			return nil, e
+		}
+		return AttachEvidence(root, p.DraftID, v.Path, v.Label, v.Start, v.End)
 	case "publish.list":
 		paths, e := filepath.Glob(filepath.Join(root, ".re-discipline", "community", "drafts", "*.json"))
 		if e != nil {
@@ -113,6 +178,33 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return nil, err
 	}
 	switch p.Action {
+	case "publish.batch.prepare":
+		if conn.Alias == "" {
+			return nil, fmt.Errorf("publication requires a connected alias")
+		}
+		var v struct {
+			Paths []string `json:"paths"`
+		}
+		if e := json.Unmarshal(p.Data, &v); e != nil {
+			return nil, e
+		}
+		return PrepareBatch(root, conn, v.Paths, p.Build)
+	case "publish.reconcile":
+		if conn.Alias == "" {
+			return nil, fmt.Errorf("reconciliation requires a connected alias")
+		}
+		var v struct {
+			Sources []Adoption `json:"sources"`
+		}
+		if len(p.Data) > 0 {
+			if e := json.Unmarshal(p.Data, &v); e != nil {
+				return nil, e
+			}
+		}
+		if _, e := client.Sync(ctx, root, conn); e != nil {
+			return nil, e
+		}
+		return Reconcile(root, conn, v.Sources)
 	case "login.start":
 		return client.LoginStart(ctx)
 	case "login.finish":
@@ -178,7 +270,7 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"action":  map[string]any{"type": "string", "description": "connections, connect, disconnect, login.start, login.finish, logout, mode.set, sync, dashboard, publish.prepare, publish.preview, publish.update, publish.queue, publish.flush, publish.list, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, submission.create/list/get/review, finding.get/history/withdraw, query, changes, export, usage, audit.list, token.list/revoke"},
+		"action":  map[string]any{"type": "string", "description": "connections, connect, disconnect, login.start, login.finish, logout, mode.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, submission.create/batch/list/get/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate, query, changes, export, usage, audit.list, token.list/revoke"},
 		"service": map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
 }
 

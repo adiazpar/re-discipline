@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 - 2026-09-07
+
+Adds resumable batch publication, bounded import allowances, included evidence,
+revision reconciliation, and stable publication identity. Reviewed relationships
+group equivalent findings while preserving independent evidence and authorship.
+Combined retrieval collapses known copies and updates offline indexes incrementally.
+The community skills document all service operations for management through chat.
+
 ## 1.6.1 - 2026-09-07
 
 The hosted community service moves to `https://167.99.51.162`, with direct GitHub

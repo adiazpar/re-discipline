@@ -23,6 +23,10 @@ func TestOfflineSyncWithdrawAndAccessRevocation(t *testing.T) {
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req Request
 		json.NewDecoder(r.Body).Decode(&req)
+		if req.Action == "finding.relations" {
+			json.NewEncoder(w).Encode([]Relation{})
+			return
+		}
 		if req.Action != "changes" {
 			t.Error(req.Action)
 		}

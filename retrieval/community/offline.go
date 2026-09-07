@@ -37,7 +37,7 @@ func cacheDB(root string, c Connection) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS docs(id TEXT PRIMARY KEY,revision TEXT NOT NULL,document TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);`)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS docs(id TEXT PRIMARY KEY,revision TEXT NOT NULL,document TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY);`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -106,6 +106,10 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 				valid = false
 				break
 			}
+			if _, e = tx.Exec(`INSERT OR IGNORE INTO pending(id) VALUES(?)`, change.FindingID); e != nil {
+				valid = false
+				break
+			}
 			cursor = change.Sequence
 			count++
 		}
@@ -128,21 +132,42 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 			break
 		}
 	}
+	var relations []Relation
+	if e := c.Operation(ctx, "finding.relations", conn.CommunityID, map[string]any{}, &relations); e == nil {
+		if _, e = db.Exec(`INSERT INTO meta(key,value) VALUES('relations',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(mustJSON(relations))); e != nil {
+			return nil, e
+		}
+	} else {
+		// Older services have no relationship endpoint. Never retain stale
+		// equivalence after a failed refresh; independent results remain useful.
+		var ae *APIError
+		if errors.As(e, &ae) && (ae.Status == 401 || ae.Status == 403 || ae.Status == 404) {
+			db.Exec(`INSERT INTO meta(key,value) VALUES('blocked','true') ON CONFLICT(key) DO UPDATE SET value='true'`)
+			return nil, e
+		}
+		if _, e = db.Exec(`DELETE FROM meta WHERE key='relations'`); e != nil {
+			return nil, e
+		}
+	}
 	return map[string]any{"community": conn.Alias, "sequence": cursor, "changes": count, "synced_at": meta(db, "synced_at")}, nil
 }
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Result struct {
-	Source      string `json:"source"`
-	CommunityID string `json:"community_id,omitempty"`
-	FindingID   string `json:"finding_id,omitempty"`
-	Revision    string `json:"revision,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Title       string `json:"title"`
-	Snippet     string `json:"snippet"`
-	Kind        string `json:"kind"`
-	Grade       string `json:"grade"`
-	URL         string `json:"url,omitempty"`
+	Service       string     `json:"service,omitempty"`
+	Locations     []Location `json:"locations,omitempty"`
+	Contributions []Result   `json:"contributions,omitempty"`
+	CanonicalID   string     `json:"canonical_id,omitempty"`
+	Source        string     `json:"source"`
+	CommunityID   string     `json:"community_id,omitempty"`
+	FindingID     string     `json:"finding_id,omitempty"`
+	Revision      string     `json:"revision,omitempty"`
+	Path          string     `json:"path,omitempty"`
+	Title         string     `json:"title"`
+	Snippet       string     `json:"snippet"`
+	Kind          string     `json:"kind"`
+	Grade         string     `json:"grade"`
+	URL           string     `json:"url,omitempty"`
 }
 type QueryResult struct {
 	Hits     []Result         `json:"hits"`
@@ -172,18 +197,22 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 	if cursor == "" {
 		return nil, nil, fmt.Errorf("no offline cache; connect and sync while online")
 	}
-	gen := filepath.Join(cacheRoot(root, c), "indexes", cursor)
+	gen := filepath.Join(cacheRoot(root, c), "indexes", "current")
 	if err = os.MkdirAll(filepath.Join(gen, ".re-discipline", "docs"), 0700); err != nil {
 		return nil, nil, err
 	}
-	mapping := map[string]string{}
-	rows, err := db.Query(`SELECT id,revision,document FROM docs`)
+	if meta(db, "materialized") == "" {
+		if _, err = db.Exec(`INSERT OR IGNORE INTO pending SELECT id FROM docs`); err != nil {
+			return nil, nil, err
+		}
+	}
+	rows, err := db.Query(`SELECT p.id,COALESCE(d.document,'') FROM pending p LEFT JOIN docs d ON d.id=p.id`)
 	if err != nil {
 		return nil, nil, err
 	}
 	for rows.Next() {
-		var fid, rid, body string
-		if err = rows.Scan(&fid, &rid, &body); err != nil {
+		var fid, body string
+		if err = rows.Scan(&fid, &body); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
@@ -192,12 +221,18 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 			return nil, nil, err
 		}
 		var d Document
+		p := filepath.Join(gen, ".re-discipline", "docs", fid+".md")
+		if body == "" {
+			if e := os.Remove(p); e != nil && !os.IsNotExist(e) {
+				rows.Close()
+				return nil, nil, e
+			}
+			continue
+		}
 		if err = json.Unmarshal([]byte(body), &d); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
-		mapping[fid] = rid
-		p := filepath.Join(gen, ".re-discipline", "docs", fid+".md")
 		if old, e := os.ReadFile(p); e != nil || string(old) != d.Markdown {
 			if err = os.WriteFile(p, []byte(d.Markdown), 0600); err != nil {
 				rows.Close()
@@ -209,19 +244,48 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 	if err = rows.Err(); err != nil {
 		return nil, nil, err
 	}
+	var relations []Relation
+	json.Unmarshal([]byte(meta(db, "relations")), &relations)
+	canonical := map[string]string{}
+	for _, rel := range relations {
+		if rel.Kind != "equivalent" || !rel.Current {
+			continue
+		}
+		var a, b string
+		if db.QueryRow(`SELECT revision FROM docs WHERE id=?`, rel.SourceID).Scan(&a) == nil && db.QueryRow(`SELECT revision FROM docs WHERE id=?`, rel.TargetID).Scan(&b) == nil && a == rel.SourceRevision && b == rel.TargetRevision {
+			canonical[rel.SourceID] = rel.TargetID
+		}
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 8
+	}
+	opts.Limit += len(canonical)
 	hits, warnings, err := engine.Query(gen, q, opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	PruneIndexes(filepath.Join(cacheRoot(root, c), "indexes"), cursor)
+	if _, err = db.Exec(`DELETE FROM pending; INSERT INTO meta(key,value) VALUES('materialized','true') ON CONFLICT(key) DO UPDATE SET value='true'`); err != nil {
+		return nil, nil, err
+	}
 	out := []Result{}
 	for _, h := range hits {
 		fid := strings.TrimSuffix(filepath.Base(h.Path), ".md")
-		out = append(out, Result{Source: c.Alias, CommunityID: c.CommunityID, FindingID: fid, Revision: mapping[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
+		var rid string
+		if err = db.QueryRow(`SELECT revision FROM docs WHERE id=?`, fid).Scan(&rid); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, Result{Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid, CanonicalID: canonical[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
 	}
 	return out, map[string]any{"source": c.Alias, "sequence": cursor, "synced_at": synced, "cached": true, "warnings": warnings}, nil
 }
 func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.Options) (QueryResult, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	// Fetch a full page from each source, then collapse before the final limit.
+	// Copies across sources cannot consume slots in the resulting page.
+	opts.Limit = limit
 	s, err := LoadSettings(root)
 	out := QueryResult{Hits: []Result{}, Warnings: []string{}, Sources: []map[string]any{}}
 	if err != nil {
@@ -269,25 +333,15 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 			out.Sources = append(out.Sources, source)
 		}
 	}
-	// Group by source. Identical community revisions connected under aliases appear once.
-	seen := map[string]bool{}
-	unique := out.Hits[:0]
-	for _, h := range out.Hits {
-		key := h.CommunityID + "/" + h.FindingID + "/" + h.Revision
-		if h.Source == "local" {
-			key = "local/" + h.Path
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		unique = append(unique, h)
-	}
-	out.Hits = unique
-	return out, nil
+	out.Hits, err = collapseCopies(root, interleaveSources(out.Hits), limit)
+	return out, err
 }
 
 type Draft struct {
+	LastStatus   int        `json:"last_status,omitempty"`
+	ReplacedBy   string     `json:"replaced_by,omitempty"`
+	LocalID      string     `json:"local_id,omitempty"`
+	SourceDigest string     `json:"source_digest,omitempty"`
 	ID           string     `json:"id"`
 	Connection   Connection `json:"connection"`
 	Document     Document   `json:"document"`
@@ -331,16 +385,26 @@ func Prepare(root string, c Connection, rel, build string) (Draft, []Check, erro
 		return Draft{}, nil, err
 	}
 	parsed := engine.Parse(clean, string(b))
+	if build == "" {
+		build = parsed.Build
+	}
 	d := Document{SourcePath: clean, Markdown: string(b), Kind: parsed.Kind, Grade: parsed.Grade, Build: build, Evidence: []Evidence{}}
 	for _, e := range parsed.Evidence {
-		d.Evidence = append(d.Evidence, Evidence{Label: e, Unavailable: true})
+		if strings.HasPrefix(e, "https://") {
+			d.Evidence = append(d.Evidence, Evidence{Label: e, URL: e})
+		} else {
+			d.Evidence = append(d.Evidence, Evidence{Label: e, Unavailable: true})
+		}
+	}
+	if excerpt := includedEvidence(parsed.Body); excerpt != "" {
+		d.Evidence = append(d.Evidence, Evidence{Label: "Supporting evidence included in this finding", Excerpt: excerpt})
 	}
 	checks := Validate(d)
 	if parsed.Status != "promoted" {
 		checks = append(checks, Check{"promotion", "Only promoted findings can be published.", true})
 	}
 	lower := strings.ToLower(string(b))
-	if strings.Contains(lower, "publish: false") || strings.Contains(lower, "audience: local") {
+	if strings.Contains(lower, "publish: false") || strings.Contains(lower, "audience: local") || strings.Contains(lower, "visibility: private") {
 		checks = append(checks, Check{"private_marker", "Document explicitly excludes publication.", true})
 	}
 	// Hard exclusions are never copied into a publication draft.
@@ -349,7 +413,17 @@ func Prepare(root string, c Connection, rel, build string) (Draft, []Check, erro
 			return Draft{}, checks, fmt.Errorf("finding excluded from publication: %s", check.Message)
 		}
 	}
-	draft := Draft{ID: uuid.NewString(), Connection: c, Document: d, State: "draft"}
+	draft, err := identityDraft(root, c, d, b)
+	if err != nil {
+		return draft, checks, err
+	}
+	if draft.State != "draft" {
+		return draft, Validate(draft.Document), nil
+	}
+	checks = Validate(draft.Document)
+	if parsed.Status != "promoted" {
+		checks = append(checks, Check{"promotion", "Only promoted findings can be published.", true})
+	}
 	if err = atomicJSON(draftPath(root, draft.ID), draft); err != nil {
 		return draft, checks, err
 	}
@@ -360,8 +434,8 @@ func Queue(root, id string) (Draft, error) {
 	if err != nil {
 		return d, err
 	}
-	if d.State == "submitted" {
-		return d, fmt.Errorf("draft already submitted")
+	if d.State != "draft" && d.State != "queued" {
+		return d, fmt.Errorf("only an active draft can be queued")
 	}
 	for _, c := range Validate(d.Document) {
 		if c.Blocking {

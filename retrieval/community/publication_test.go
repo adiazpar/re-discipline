@@ -1,0 +1,246 @@
+package community
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+)
+
+func TestPortabilityUsesRealText(t *testing.T) {
+	d := portable()
+	d.Markdown += "\nNotes:\nThe byte escape is `\\n`. See https://example.org/report."
+	d.Evidence = []Evidence{{Label: "Published source", URL: "https://example.org/evidence"}}
+	if c := Validate(d); len(c) != 0 {
+		t.Fatalf("portable text rejected: %+v", c)
+	}
+	for _, text := range []string{`C:\Users\name\trace.txt`, `c:/work/trace.txt`, `\\server\share\trace.txt`, `http://localhost:8080`, `/home/name/work`} {
+		v := d
+		v.Markdown += "\n" + text
+		found := false
+		for _, c := range Validate(v) {
+			found = found || c.Code == "local_environment"
+		}
+		if !found {
+			t.Errorf("local path admitted: %s", text)
+		}
+	}
+}
+
+func TestStablePreparationReceiptRenameAndDivergence(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".re-discipline", "docs")
+	os.MkdirAll(dir, 0700)
+	body := []byte(portable().Markdown)
+	os.WriteFile(filepath.Join(dir, "time.md"), body, 0600)
+	c := Connection{Service: "https://example.test", CommunityID: uuid.NewString(), Alias: "test"}
+	d, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Document.Evidence = portable().Evidence
+	atomicJSON(draftPath(root, d.ID), d)
+	again, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || again.ID != d.ID || again.Document.Evidence[0].Excerpt == "" {
+		t.Fatalf("preparation lost identity or reviewed edits: %+v %v", again, err)
+	}
+	d.State = "submitted"
+	d.SubmissionID = uuid.NewString()
+	d.Digest = Digest(d.Document)
+	atomicJSON(draftPath(root, d.ID), d)
+	fid, rid := uuid.NewString(), uuid.NewString()
+	db, _ := cacheDB(root, c)
+	db.Exec(`INSERT INTO docs VALUES(?,?,?)`, fid, rid, string(mustJSON(d.Document)))
+	db.Exec(`INSERT INTO meta VALUES('cursor','1')`)
+	db.Close()
+	if _, err = Reconcile(root, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || unchanged.State != "unchanged" {
+		t.Fatalf("unchanged: %+v %v", unchanged, err)
+	}
+	hits := []Result{{Source: "local", Path: "docs/time.md"}, {Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid}}
+	got, err := collapseCopies(root, hits, 8)
+	if err != nil || len(got) != 1 || len(got[0].Locations) != 2 {
+		t.Fatalf("verified copies not collapsed: %+v %v", got, err)
+	}
+	hits[1].Revision = uuid.NewString()
+	got, _ = collapseCopies(root, hits, 8)
+	if len(got) != 2 {
+		t.Fatal("a newer remote revision was hidden")
+	}
+	db, _ = cacheDB(root, c)
+	db.Exec(`UPDATE docs SET revision=? WHERE id=?`, hits[1].Revision, fid)
+	db.Close()
+	conflict, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || conflict.State != "conflict" {
+		t.Fatalf("newer community content marked unchanged: %+v %v", conflict, err)
+	}
+	db, _ = cacheDB(root, c)
+	db.Exec(`DELETE FROM docs WHERE id=?`, fid)
+	db.Close()
+	withdrawn, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || withdrawn.State != "withdrawn" {
+		t.Fatal("deleted publication marked unchanged")
+	}
+	db, _ = cacheDB(root, c)
+	db.Exec(`INSERT INTO docs VALUES(?,?,?)`, fid, rid, string(mustJSON(d.Document)))
+	db.Close()
+	hits[1].Revision = rid
+	os.Rename(filepath.Join(dir, "time.md"), filepath.Join(dir, "clock.md"))
+	renamed, _, err := Prepare(root, c, "docs/clock.md", "build one")
+	if err != nil || renamed.LocalID != d.LocalID || renamed.State != "unchanged" {
+		t.Fatalf("rename lost lineage: %+v %v", renamed, err)
+	}
+	os.WriteFile(filepath.Join(dir, "clock.md"), append(body, []byte("\nA local revision.")...), 0600)
+	updated, _, err := Prepare(root, c, "docs/clock.md", "build one")
+	if err != nil || updated.Document.FindingID != fid || updated.Document.BaseRevision != rid || updated.ID == d.ID {
+		t.Fatalf("update did not use receipt: %+v %v", updated, err)
+	}
+	hits[0].Path = "docs/clock.md"
+	got, _ = collapseCopies(root, hits, 8)
+	if len(got) != 2 {
+		t.Fatal("local changes were hidden")
+	}
+	os.WriteFile(filepath.Join(dir, "copy.md"), body, 0600)
+	copy, _, err := Prepare(root, c, "docs/copy.md", "build one")
+	if err != nil || copy.LocalID == d.LocalID {
+		t.Fatal("a copy asserted another finding's identity")
+	}
+}
+
+func TestBatchPartialFailureAndResume(t *testing.T) {
+	root := t.TempDir()
+	calls := 0
+	seen := map[string]int{}
+	cid := uuid.NewString()
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Request
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Action != "submission.batch" {
+			t.Error(req.Action)
+		}
+		var p struct {
+			Items []BatchItem `json:"items"`
+		}
+		json.Unmarshal(req.Data, &p)
+		calls++
+		out := []BatchOutcome{}
+		for i, item := range p.Items {
+			seen[item.Key]++
+			v := BatchOutcome{Key: item.Key}
+			if calls == 1 && i == 1 {
+				v.Status = 422
+				v.Error = "needs evidence"
+			} else {
+				v.Submission = &Submission{ID: uuid.NewString(), CommunityID: cid, Digest: Digest(item.Document), State: "queued"}
+			}
+			out = append(out, v)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"items": out})
+	}))
+	defer h.Close()
+	c := Connection{Service: h.URL, CommunityID: cid, Alias: "test"}
+	SaveSettings(root, Settings{Mode: "both", Connections: []Connection{c}})
+	ids := []string{}
+	for i := 0; i < 3; i++ {
+		d := Draft{ID: uuid.NewString(), Connection: c, Document: portable(), State: "queued"}
+		d.Digest = Digest(d.Document)
+		atomicJSON(draftPath(root, d.ID), d)
+		ids = append(ids, d.ID)
+	}
+	if _, err := FlushBatch(context.Background(), root, "test", ""); err != nil {
+		t.Fatal(err)
+	}
+	pending := 0
+	for _, id := range ids {
+		d, _ := ReadDraft(root, id)
+		if d.State == "queued" {
+			pending++
+		}
+	}
+	if pending != 1 {
+		t.Fatalf("pending=%d", pending)
+	}
+	if _, err := FlushBatch(context.Background(), root, "test", ""); err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	for _, n := range seen {
+		requests += n
+	}
+	if requests != 4 {
+		t.Fatalf("successful documents resent: %d", requests)
+	}
+}
+
+func TestSelectedEvidenceBoundary(t *testing.T) {
+	root := t.TempDir()
+	d := Draft{ID: uuid.NewString(), State: "draft", Document: portable()}
+	atomicJSON(draftPath(root, d.ID), d)
+	os.WriteFile(filepath.Join(root, "trace.txt"), []byte("unselected\nselected evidence\nnot selected"), 0600)
+	got, err := AttachEvidence(root, d.ID, "trace.txt", "Selected trace", 2, 2)
+	if err != nil || got.Document.Evidence[1].Excerpt != "selected evidence" {
+		t.Fatalf("excerpt: %+v %v", got, err)
+	}
+	os.MkdirAll(filepath.Join(root, "ops"), 0700)
+	os.WriteFile(filepath.Join(root, "ops", "private.txt"), []byte("private"), 0600)
+	if _, err = AttachEvidence(root, d.ID, "ops/private.txt", "private", 1, 1); err == nil {
+		t.Fatal("ops evidence admitted")
+	}
+	if _, err = AttachEvidence(root, d.ID, "../outside.txt", "outside", 1, 1); err == nil {
+		t.Fatal("outside evidence admitted")
+	}
+	os.WriteFile(filepath.Join(root, "trace.txt"), []byte(strings.Repeat("x", 64*1024+1)), 0600)
+	if _, err = AttachEvidence(root, d.ID, "trace.txt", "too long", 1, 1); err == nil {
+		t.Fatal("oversized excerpt admitted")
+	}
+}
+
+func TestPortablePromotionAndDraftRevision(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, ".re-discipline", "docs")
+	os.MkdirAll(base, 0700)
+	body := strings.Replace(portable().Markdown, "status: promoted", "status: promoted\nbuild: Exact build and modifications", 1) + "\n## Supporting evidence\nSelected engine observation.\n## Limitations\nOne investigated build."
+	os.WriteFile(filepath.Join(base, "finding.md"), []byte(body), 0600)
+	c := Connection{Service: "https://example.test", CommunityID: uuid.NewString(), Alias: "test"}
+	d, checks, err := Prepare(root, c, "docs/finding.md", "")
+	if err != nil || len(checks) != 0 || d.Document.Build != "Exact build and modifications" || d.Document.Evidence[0].Excerpt != "Selected engine observation." {
+		t.Fatalf("portable promotion: %+v %+v %v", d, checks, err)
+	}
+	d.State = "queued"
+	d.LastStatus = 422
+	atomicJSON(draftPath(root, d.ID), d)
+	revision, err := Revise(context.Background(), root, d.ID)
+	if err != nil || revision.ID == d.ID || revision.LocalID != d.LocalID {
+		t.Fatalf("revision lost identity: %+v %v", revision, err)
+	}
+	old, _ := ReadDraft(root, d.ID)
+	if old.State != "replaced" || old.ReplacedBy != revision.ID {
+		t.Fatal("failed draft remains queued")
+	}
+	again, _, err := Prepare(root, c, "docs/finding.md", "")
+	if err != nil || again.ID != revision.ID {
+		t.Fatal("preparation did not follow the new draft")
+	}
+	revision.Document.Markdown += "\naudience: local"
+	atomicJSON(draftPath(root, revision.ID), revision)
+	if _, err = Queue(root, revision.ID); err == nil {
+		t.Fatal("local marker added during editing bypassed queue checks")
+	}
+}
+
+func TestSourceBlendingDoesNotStarveCommunity(t *testing.T) {
+	hits := []Result{{Source: "local", Path: "first"}, {Source: "local", Path: "second"}, {Source: "doom", Service: "https://example.test", CommunityID: "community", FindingID: "external", Revision: "one"}}
+	got, err := collapseCopies(t.TempDir(), interleaveSources(hits), 2)
+	if err != nil || len(got) != 2 || got[1].Source != "doom" {
+		t.Fatalf("community-only result starved: %+v %v", got, err)
+	}
+}

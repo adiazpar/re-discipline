@@ -3,7 +3,9 @@
 This project curates hard facts about the software under analysis in
 `.re-discipline/`. Any agent that can read files and run a command can
 use it. The recovery path for every problem here is "edit a text file"
-or "delete and rebuild" — nothing requires exact hashes or protocols.
+or "delete and rebuild" for search indexes. Publication receipts are provenance:
+retain `.re-discipline/community/` when moving a workspace so retry identities
+and verified local/community relationships survive.
 
 ## Layout
 
@@ -36,6 +38,7 @@ misses a doc you know exists, add it to `golden.jsonl`.
     status: promoted | superseded    # candidate while in active/*/findings/
     kind: fact | ops | reference
     grade: direct | inferred | reported
+    build: software version, executable identity, and relevant modifications
     idents: [idLangDict, TAG_LANGDICT]     # identifiers this doc owns
     aliases: [string table, localisation dump]   # other words a searcher may use
     evidence: [archive/<slug>/reports/R-001.md]
@@ -44,6 +47,10 @@ misses a doc you know exists, add it to `golden.jsonl`.
     # One-sentence claim as the title
 
     Details, addresses, snippets.
+
+    ## Supporting evidence
+
+    A selected observation or excerpt, with provenance and its limits.
 
 - `grade`: `direct` = observed in decompilation/memory; `inferred` =
   deduced; `reported` = external source.
@@ -72,6 +79,13 @@ misses a doc you know exists, add it to `golden.jsonl`.
 - Titles are searchable assertions, not labels.
 - Negative results are first-class docs: "X does not work, because Y."
 - Conflicting observations may both be recorded with the conflict noted.
+- Promoted findings should be readable outside the originating workspace: include
+  applicability, relevant modifications, limitations and a bounded supporting
+  excerpt. Put personal setup and full operational traces in reports or `docs/ops/`.
+  The publication tool can carry the supporting-evidence section and HTTPS
+  citations directly; it does not recursively upload cited local reports.
+  Exact source digests identify versions, not the truth of a claim.
+  Portability never implies permission to publish.
 
 ### Generated docs dilute the index
 
