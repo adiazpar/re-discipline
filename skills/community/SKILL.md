@@ -15,16 +15,17 @@ documents. `connections` reports the current project's subscriptions and source 
 A new connection changes local-only retrieval to `both`. `mode.set` selects
 `local` (no external requests), `external`, or `both` independently of transport.
 
-For server-only retrieval without downloading the KB, pass `retrieval: "remote"`
+Server-only retrieval is the default when no preference is recorded. To select it
+explicitly without downloading the KB, pass `retrieval: "remote"`
 on `connect`, or call `retrieval.set` with `retrieval: "remote"` for an existing
 project. This persists in `.re-discipline/community.json` and applies to every
 connected community. Normal `query` searches then request matching results from
 the server, including when sources is `both`. No initial sync or offline fallback
 runs. Existing cached files remain on disk but are not read in this mode.
 
-`retrieval: "sync"` retains the default full-library cache and incremental refresh.
-Only select it when offline caching is wanted. A request to avoid downloads must
-use remote on the initial connect; setting it after a default connect is too late.
+`retrieval: "sync"` opts into a full-library cache and incremental refresh.
+Only select it when offline caching is wanted. Existing explicit sync preferences are preserved. For a request to avoid downloads,
+pass remote on connect to override any previously selected sync preference.
 Remote queries need connectivity; report unavailable sources and retain local
 results when searching both. Fetch a selected full finding through `finding.get`.
 

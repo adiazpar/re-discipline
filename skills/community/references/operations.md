@@ -10,7 +10,7 @@ Local client actions:
 |---|---|
 | `connections` | none |
 | `login.start`, `login.finish`, `logout` | `service` |
-| `connect` | `service`, `community`, optional new `alias`, optional `retrieval`: remote or sync; remote avoids the initial KB download and persists project-wide |
+| `connect` | `service`, `community`, optional new `alias`, optional `retrieval`: remote (default when unset) or sync; remote avoids the initial KB download and persists project-wide |
 | `disconnect` | `alias`; retains the downloaded cache |
 | `mode.set` | `mode`: local, external, both |
 | `retrieval.set` | `retrieval`: remote (server search, no KB cache) or sync (full offline cache); independent of source mode, persisted per project |

@@ -69,7 +69,9 @@ uses `retrieval.set` for an existing connection. This preference is stored in
 `.re-discipline/community.json`, separately from `mode: local|external|both`.
 Remote mode returns only matching results and needs connectivity; it never
 synchronizes the whole library or falls back to cached community content.
-`retrieval: "sync"` is the backward-compatible default for offline caching.
+Server-only retrieval is the default for new projects and settings without a
+recorded transport. `retrieval: "sync"` explicitly enables offline caching;
+existing explicit sync preferences are preserved.
 
 
 - `/re-discipline:community` — sign in, create or connect a library, invite

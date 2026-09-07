@@ -18,6 +18,9 @@ func portable() Document {
 }
 func TestOfflineSyncWithdrawAndAccessRevocation(t *testing.T) {
 	root := t.TempDir()
+	if err := SaveSettings(root, Settings{Mode: "local", Retrieval: "sync"}); err != nil {
+		t.Fatal(err)
+	}
 	cid, fid, rid := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	state := 0
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +67,7 @@ func TestOfflineSyncWithdrawAndAccessRevocation(t *testing.T) {
 	if e != nil || len(hits) != 1 {
 		t.Fatalf("cache query: %v %v", hits, e)
 	}
-	if e = SaveSettings(root, Settings{Mode: "both", Connections: []Connection{conn}}); e != nil {
+	if e = SaveSettings(root, Settings{Mode: "both", Retrieval: "sync", Connections: []Connection{conn}}); e != nil {
 		t.Fatal(e)
 	}
 	r, e := Query(context.Background(), root, "timescale", "external", true, engine.Options{})

@@ -139,7 +139,7 @@ func LoadSettings(root string) (Settings, error) {
 	var s Settings
 	b, err := os.ReadFile(SettingsPath(root))
 	if os.IsNotExist(err) {
-		return Settings{Retrieval: "sync", Mode: "local", Connections: []Connection{}, Exclude: []string{}}, nil
+		return Settings{Retrieval: "remote", Mode: "local", Connections: []Connection{}, Exclude: []string{}}, nil
 	}
 	if err != nil {
 		return s, err
@@ -149,7 +149,7 @@ func LoadSettings(root string) (Settings, error) {
 		err = validateRetrieval(s.Retrieval)
 	}
 	if s.Retrieval == "" {
-		s.Retrieval = "sync"
+		s.Retrieval = "remote"
 	}
 	return s, err
 }
@@ -161,7 +161,7 @@ func SaveSettings(root string, s Settings) error {
 		return err
 	}
 	if s.Retrieval == "" {
-		s.Retrieval = "sync"
+		s.Retrieval = "remote"
 	}
 	return atomicJSON(SettingsPath(root), s)
 }

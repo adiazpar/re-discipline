@@ -9,6 +9,7 @@ Call the `community` tool with `connections` first. Source mode (`local`,
 `external`, `both`) and community transport (`remote`, `sync`) are independent.
 For server-only retrieval, call `retrieval.set` with `retrieval: "remote"` and
 use the normal query tool; do not call sync. This preference persists per project.
+Server-only retrieval is the default unless a project explicitly selected sync.
 In remote mode, offline queries skip community sources with an availability warning.
 
 For an explicit request to enable offline caching, set `retrieval: "sync"`, then

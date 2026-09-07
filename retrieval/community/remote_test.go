@@ -54,7 +54,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 		}
 	}))
 	defer h.Close()
-	if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: h.URL, Community: "doom", Alias: "doom", Retrieval: "remote"}); err != nil {
+	if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: h.URL, Community: "doom", Alias: "doom"}); err != nil {
 		t.Fatal(err)
 	}
 	settings, err := LoadSettings(root)
@@ -112,7 +112,7 @@ func TestRetrievalPreferenceMigrationAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := LoadSettings(root)
-	if err != nil || s.Retrieval != "sync" {
+	if err != nil || s.Retrieval != "remote" {
 		t.Fatalf("legacy settings: %+v %v", s, err)
 	}
 	for _, choice := range []string{"remote", "sync"} {
@@ -138,7 +138,7 @@ func TestRetrievalPreferenceMigrationAndValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultConnectStillSynchronizes(t *testing.T) {
+func TestExplicitSyncConnectStillSynchronizes(t *testing.T) {
 	root := t.TempDir()
 	cid := uuid.NewString()
 	var mu sync.Mutex
@@ -161,14 +161,14 @@ func TestDefaultConnectStillSynchronizes(t *testing.T) {
 		}
 	}))
 	defer h.Close()
-	if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: h.URL, Community: "doom", Alias: "doom"}); err != nil {
+	if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: h.URL, Community: "doom", Alias: "doom", Retrieval: "sync"}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
 	changes := actions["changes"]
 	mu.Unlock()
 	if changes != 1 {
-		t.Fatalf("default connect skipped synchronization: %d", changes)
+		t.Fatalf("explicit sync connect skipped synchronization: %d", changes)
 	}
 	settings, err := LoadSettings(root)
 	if err != nil || settings.Retrieval != "sync" {

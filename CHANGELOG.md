@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.2 - 2026-09-07
+
+Server-only retrieval is now the default for new projects and settings without
+an explicit transport. Full-library offline caching requires selecting sync.
+Existing explicit sync preferences remain supported.
+
 ## 1.7.1 - 2026-09-07
 
 Adds persistent server-only community retrieval. Select remote transport when
