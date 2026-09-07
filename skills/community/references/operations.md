@@ -33,19 +33,19 @@ Service actions and their `data` payloads:
 | `member.remove` | `{user_id}`; owner cannot remove themselves |
 | `invite.create` | `{role:"contributor",hours:72}`; 1–168 hours |
 | `invite.list` | `{}` |
-| `invite.revoke` | `{id}` |
+| `invite.revoke` | `{id}`; permanently deletes the invitation |
 | `invite.redeem` | `{token}`; service only, community not required |
 | `submission.create` | `{idempotency_key:<UUID>,document:<below>}`; prefer the local draft pipeline |
 | `submission.list` | `{state?}`; contributor sees own submissions, maintainers see the queue |
 | `submission.get` | `{id}` |
 | `submission.review` | `{id,digest,policy_version,decision,rationale}`; decision accept, reject, request_changes |
 | `finding.get`, `finding.history` | `{id}` |
-| `finding.withdraw` | `{id,revision,reason}`; produces a synchronization tombstone |
+| `finding.withdraw` | `{id,revision,reason}`; permanently erases finding content, submissions, reviews, and server caches; retains content-free sync markers |
 | `query` | `{query,limit?,kind?,grade?}` |
 | `changes`, `export` | `{since:0,through:0,limit:200}`; follow `more`, pin through from first page |
 | `usage`, `audit.list` | `{}` |
 | `token.list` | `{}`; service only |
-| `token.revoke` | `{id}`; service only |
+| `token.revoke` | `{id}`; permanently deletes the device credential; service only |
 
 Visibility is public, unlisted, or private. Policy mode is maintainer, trusted,
 or automated. Community creation, storage, memberships, and model reviews have

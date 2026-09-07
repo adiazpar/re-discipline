@@ -27,3 +27,10 @@ refresh and reconcile rather than bypassing the conflict.
 Report actual resulting state. An acceptance request can result in `conflict` when
 the accepted finding changed concurrently. For many findings or long diffs, offer
 the optional dashboard; routine review can stay entirely in chat.
+
+`finding.withdraw` permanently deletes the finding and its related content and
+review history from the live service. Use it only when permanent removal is within
+the user's request; a request to correct a finding normally calls for a new revision.
+Offline clients remove their cached copy on their next sync. Content-free deletion
+markers prevent old snapshots or queued retries from restoring the deleted content.
+Existing backups follow the service retention policy.
