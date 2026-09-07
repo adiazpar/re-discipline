@@ -19,8 +19,8 @@ subsequent retrieval synchronizes with that service. `mode.set` can select `loca
 For sign-in, call `login.start` with `service`. Show the returned verification URL
 and code. The user approves the device in the browser, then call `login.finish`.
 Tokens remain in the OS credential store. Do not ask the user to paste passwords,
-refresh tokens, or service secrets into chat. A service operator's Supabase MCP
-connection is never distributed to community members.
+refresh tokens, or service secrets into chat. Hosting and database administration
+credentials are never distributed to community members.
 
 When creating a community, help the user articulate the subject, applicable
 software, and excluded subjects. Default to private visibility and maintainer

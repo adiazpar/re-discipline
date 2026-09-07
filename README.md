@@ -57,7 +57,7 @@ for 1.x upgrades.
 
 ## Community knowledge
 
-The optional [community service](https://re-discipline-community.onrender.com)
+The optional [community service](https://167.99.51.162)
 adds shared libraries to local retrieval. Its backend lives in the separate
 [community repository](https://github.com/adiazpar/re-discipline-community).
 The plugin remains usable without an account or network connection.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.6.1 - 2026-09-07
+
+The hosted community service moves to `https://167.99.51.162`, with direct GitHub
+sign-in. Existing users sign in to the new service and reconnect their community
+alias. Community IDs and memberships are preserved. Offline caches and drafts
+remain local; queued drafts retain their original destination and must be reviewed
+before publication to a different service address.
+
+## 1.6.0 - 2026-09-07
+
+Adds isolated community libraries, device sign-in, invitations, scoped publication
+and review, and retrieval from local, external, or combined sources. Accepted
+community knowledge synchronizes to offline caches; selected drafts can be queued
+locally for explicit publication later.
+
 ## 1.5.0 - 2026-08-19
 
 Two new commands and a skill that draws the result.
