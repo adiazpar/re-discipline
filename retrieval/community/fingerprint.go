@@ -17,6 +17,8 @@ func ContentDigest(d Document) string {
 }
 
 type FindingMatch struct {
+	SourcePath      string   `json:"source_path,omitempty"`
+	MatchKind       string   `json:"match_kind,omitempty"`
 	Warnings        []string `json:"warnings,omitempty"`
 	TextDigest      string   `json:"text_digest"`
 	FindingID       string   `json:"finding_id"`

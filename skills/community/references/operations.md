@@ -54,7 +54,7 @@ Service actions and their `data` payloads:
 | `publication.resolve` | `{document}`; read server identity, current revision and similarity candidates before publishing |
 | `publication.receipts` | `{keys:[UUID]}`; at most 200 of the signed-in publisher's retry keys; compact server receipts |
 | `submission.resolve` | owner/maintainer: `{id,mode, finding_id?,base_revision?,rationale}`; mode create, revision, contribution; target and base required for the latter two; returns incremented resolution_version |
-| `finding.match` | `{digests:[SHA256]}`; at most 50 exact text hashes; returns current validity, matched/current revision and replacement, including old text matches |
+| `finding.match` | `{digests:[SHA256],source_paths?:[relativePath],source_namespace?:string}`; at most 50 hashes and paths; returns current validity, matched/current revision and replacement, including old text matches |
 | `finding.assess` | owner/maintainer: `{id,revision,status,reason,evidence:[{label,url?,excerpt?}],replacement_id?}`; status active, disputed, refuted, superseded; superseded requires replacement |
 | `finding.consolidate` | owner/maintainer: `{apply:false}` previews exact payload groups; true records up to 200 revision-pinned relationships; repeat while more_possible |
 | `finding.contributions` | `{id,after?:submission_id}`; pages contain at most 200 rows; after the last returned submission_id gets the next page; accepted attached copies with publisher attribution and evidence |
@@ -102,3 +102,13 @@ Changed source files, different remote revisions, and stale comparisons remain
 visible. Similar titles alone never suppress results. The server recognizes renamed
 exact payloads. A renamed and edited document needs an explicit reviewed identity
 link; a path or local cache cannot establish that link.
+
+Remote combined retrieval also uses the server source registry to group local and
+published variants that differ after portability editing. `versions` retains the
+published search result and `locations[].different_text` distinguishes the texts.
+These are unverified local variants, not certified equivalent claims. Compare their
+content and evidence. A source path is resolved within its community/namespace,
+preferring the caller's own binding; ambiguous shared bindings remain separate.
+Only relative promoted-document paths and hashes are sent, never local bodies.
+Offline matching uses downloaded exact fingerprints; unmatched variants remain
+separate until a server comparison is possible.

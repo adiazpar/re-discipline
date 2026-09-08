@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.1 - 2026-09-07
+
+Combined retrieval groups server-linked source variants when portable publications
+differ from local originals. Published versions and evidence remain visible, with
+explicit warnings that local changes are unverified. Ambiguous source paths remain
+separate. Matching uses community source namespaces and supports shared checkouts.
+
 ## 1.8.0 - 2026-09-07
 
 Publication identity now belongs to the community service. Local publication

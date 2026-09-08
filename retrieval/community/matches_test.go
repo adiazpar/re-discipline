@@ -116,3 +116,57 @@ func TestFingerprintPreservesClaimDifferences(t *testing.T) {
 		}
 	}
 }
+
+func TestServerSourceVariantsKeepPublishedEvidence(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".re-discipline", "docs")
+	os.MkdirAll(dir, 0700)
+	local := portable().Markdown
+	published := local + "\n## Publication provenance\nEvidence packaged separately."
+	os.WriteFile(filepath.Join(dir, "time.md"), []byte(local), 0600)
+	status := "active"
+	ambiguous := false
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Request
+		json.NewDecoder(r.Body).Decode(&req)
+		var p struct {
+			SourcePaths []string `json:"source_paths"`
+		}
+		json.Unmarshal(req.Data, &p)
+		if len(p.SourcePaths) != 1 || p.SourcePaths[0] != "docs/time.md" || strings.Contains(string(req.Data), local) {
+			t.Error("expected relative source path and hashes only")
+		}
+		rows := []FindingMatch{{SourcePath: "docs/time.md", MatchKind: "source", TextDigest: TextDigest(published), FindingID: "finding", Revision: "revision", Status: status, Current: true}}
+		if ambiguous {
+			other := rows[0]
+			other.FindingID = "different"
+			rows = append(rows, other)
+		}
+		json.NewEncoder(w).Encode(rows)
+	}))
+	defer h.Close()
+	c := Connection{Service: h.URL, CommunityID: "community", Alias: "doom"}
+	initial := func() []Result {
+		return []Result{{Source: "local", Path: "docs/time.md"}, {Source: "doom", Service: h.URL, CommunityID: c.CommunityID, FindingID: "finding", Revision: "revision", TextDigest: TextDigest(published), Snippet: "Published evidence summary"}}
+	}
+	hits, err := matchLocal(context.Background(), root, initial(), c, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grouped, _ := collapseCopies(root, hits, 8)
+	if len(grouped) != 1 || len(grouped[0].Warnings) == 0 || len(grouped[0].Versions) != 1 || grouped[0].Versions[0].Snippet != "Published evidence summary" {
+		t.Fatalf("source variant erased or mislabeled: %+v", grouped)
+	}
+	status = "refuted"
+	hits, _ = matchLocal(context.Background(), root, initial(), c, false)
+	if len(hits[0].Warnings) == 0 || !strings.Contains(hits[0].Warnings[0], "refuted") {
+		t.Fatal("portable local variant lost refutation warning")
+	}
+	status = "active"
+	ambiguous = true
+	hits, _ = matchLocal(context.Background(), root, initial(), c, false)
+	grouped, _ = collapseCopies(root, hits, 8)
+	if len(grouped) != 2 {
+		t.Fatal("ambiguous source path silently grouped")
+	}
+}

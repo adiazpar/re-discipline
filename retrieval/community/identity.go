@@ -104,14 +104,15 @@ func Reconcile(root string, c Connection, legacy []Adoption) (map[string]any, er
 }
 
 type Location struct {
-	CanonicalID string `json:"canonical_id,omitempty"`
-	Source      string `json:"source"`
-	Service     string `json:"service,omitempty"`
-	CommunityID string `json:"community_id,omitempty"`
-	FindingID   string `json:"finding_id,omitempty"`
-	Revision    string `json:"revision,omitempty"`
-	Path        string `json:"path,omitempty"`
-	URL         string `json:"url,omitempty"`
+	DifferentText bool   `json:"different_text,omitempty"`
+	CanonicalID   string `json:"canonical_id,omitempty"`
+	Source        string `json:"source"`
+	Service       string `json:"service,omitempty"`
+	CommunityID   string `json:"community_id,omitempty"`
+	FindingID     string `json:"finding_id,omitempty"`
+	Revision      string `json:"revision,omitempty"`
+	Path          string `json:"path,omitempty"`
+	URL           string `json:"url,omitempty"`
 }
 
 func collapseCopies(root string, hits []Result, limit int) ([]Result, error) {
@@ -143,11 +144,23 @@ func collapseCopies(root string, hits []Result, limit int) ([]Result, error) {
 		loc := Location{Source: h.Source, Service: h.Service, CommunityID: h.CommunityID, FindingID: h.FindingID, Revision: h.Revision, Path: h.Path, URL: h.URL, CanonicalID: h.CanonicalID}
 		if i, ok := seen[key]; ok {
 			if h.Source == "local" && out[i].Source != "local" {
-				h.Locations = append([]Location{loc}, out[i].Locations...)
+				if h.TextDigest != "" && out[i].TextDigest != "" && h.TextDigest != out[i].TextDigest {
+					prior := out[i]
+					prior.Versions = nil
+					prior.Contributions = nil
+					h.Versions = append(h.Versions, prior)
+				}
+				h.Locations = append(h.Locations, out[i].Locations...)
 				h.Contributions = append(h.Contributions, out[i].Contributions...)
 				h.Warnings = append(h.Warnings, out[i].Warnings...)
 				out[i] = h
 			} else {
+				if out[i].Source == "local" && h.Source != "local" && out[i].TextDigest != "" && h.TextDigest != "" && out[i].TextDigest != h.TextDigest {
+					version := h
+					version.Versions = nil
+					version.Contributions = nil
+					out[i].Versions = append(out[i].Versions, version)
+				}
 				out[i].Locations = append(out[i].Locations, loc)
 				out[i].Contributions = append(out[i].Contributions, h.Contributions...)
 				out[i].Warnings = append(out[i].Warnings, h.Warnings...)

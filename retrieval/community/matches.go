@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Only hashes leave local retrieval. Server-certified revision matches are
 // disposable observations, not client assertions of publication identity.
 func matchLocal(ctx context.Context, root string, hits []Result, c Connection, cached bool) ([]Result, error) {
 	digests := []string{}
+	paths := []string{}
 	for i := range hits {
 		h := &hits[i]
 		if h.Source != "local" {
@@ -23,6 +25,11 @@ func matchLocal(ctx context.Context, root string, hits []Result, c Connection, c
 		}
 		h.TextDigest = TextDigest(string(b))
 		digests = append(digests, h.TextDigest)
+		path := ""
+		if h.Kind != "ops" && strings.HasPrefix(h.Path, "docs/") && !strings.HasPrefix(h.Path, "docs/ops/") {
+			path = h.Path
+		}
+		paths = append(paths, path)
 	}
 	if len(digests) == 0 {
 		return hits, nil
@@ -81,7 +88,7 @@ func matchLocal(ctx context.Context, root string, hits []Result, c Connection, c
 				return hits, err
 			}
 			var page []FindingMatch
-			if err = client.Operation(ctx, "finding.match", c.CommunityID, map[string]any{"digests": digests[offset:end]}, &page); err != nil {
+			if err = client.Operation(ctx, "finding.match", c.CommunityID, map[string]any{"digests": digests[offset:end], "source_paths": paths[offset:end], "source_namespace": c.SourceNamespace}, &page); err != nil {
 				return hits, err
 			}
 			matches = append(matches, page...)
@@ -98,12 +105,35 @@ func matchLocal(ctx context.Context, root string, hits []Result, c Connection, c
 				builds[m.Build] = true
 			}
 		}
+		sourceMatches := []FindingMatch{}
+		for _, m := range matches {
+			if m.MatchKind == "source" && m.SourcePath == h.Path {
+				sourceMatches = append(sourceMatches, m)
+			}
+		}
+		if len(sourceMatches) > 1 {
+			h.Warnings = append(h.Warnings, c.Alias+": source path maps to multiple findings; variants remain separate")
+		}
+		if len(sourceMatches) == 1 {
+			m := sourceMatches[0]
+			if m.TextDigest != h.TextDigest {
+				message := fmt.Sprintf("%s: server source registry links this path to finding %s, but local text differs from the published revision. Treat it as an unverified local variant; compare the published content and evidence before relying on it. Published status: %s. %s", c.Alias, m.FindingID, m.Status, m.Reason)
+				if m.ReplacementID != "" {
+					message += " Replacement: " + m.ReplacementID
+				}
+				h.Warnings = append(h.Warnings, message)
+				h.Warnings = append(h.Warnings, m.Warnings...)
+				if m.Status == "active" || m.Status == "disputed" {
+					h.Locations = append(h.Locations, Location{Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: m.FindingID, Revision: m.Revision, DifferentText: true, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + m.FindingID})
+				}
+			}
+		}
 		ambiguousBuild := len(builds) > 1
 		if ambiguousBuild {
 			h.Warnings = append(h.Warnings, c.Alias+": identical text has multiple applicability records; community variants remain separate")
 		}
 		for _, m := range matches {
-			if h.TextDigest != m.TextDigest {
+			if m.MatchKind == "source" || h.TextDigest != m.TextDigest {
 				continue
 			}
 			h.Warnings = append(h.Warnings, m.Warnings...)

@@ -186,6 +186,7 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Result struct {
+	Versions      []Result   `json:"versions,omitempty"`
 	TextDigest    string     `json:"text_digest,omitempty"`
 	Status        string     `json:"status,omitempty"`
 	Warnings      []string   `json:"warnings,omitempty"`
