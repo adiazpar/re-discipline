@@ -99,6 +99,6 @@ enters community search. A changed document requires a new submission UUID.
 server-certified exact text matches, keeping all `locations`. Confirmed equivalent
 contributor claims have expandable `contributions`; evidence lineages are distinct.
 Changed source files, different remote revisions, and stale comparisons remain
-visible. Similar titles alone never suppress results. A renamed file retains its
-local identity when the unchanged source hash identifies one disappeared path;
-copies and ambiguous moves do not silently inherit another finding's identity.
+visible. Similar titles alone never suppress results. The server recognizes renamed
+exact payloads. A renamed and edited document needs an explicit reviewed identity
+link; a path or local cache cannot establish that link.
