@@ -241,6 +241,8 @@ The community service owns source identity, immutable revisions, accepted copy
 attribution, and evidence-backed validity assessments. Local publication files are
 rebuildable caches. Combined retrieval uses server-certified exact text matches to
 collapse local/community copies and warn about old or refuted local claims.
+Server source mappings also group portability-edited variants while retaining the
+published version and marking the differing local text as unverified.
 Similar contributions require an explicit server review decision; they are never
 silently merged on wording alone. All integrity operations are available through
 the community tool; see the operation reference in the community skill.

@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// Only hashes leave local retrieval. Server-certified revision matches are
-// disposable observations, not client assertions of publication identity.
+// Matching sends hashes and relative promoted-document paths, never local bodies.
+// Server matches are disposable observations, not client assertions of identity.
 func matchLocal(ctx context.Context, root string, hits []Result, c Connection, cached bool) ([]Result, error) {
 	digests := []string{}
 	paths := []string{}
