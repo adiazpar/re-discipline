@@ -122,10 +122,11 @@ func (c *Client) LoginFinish(ctx context.Context) (any, error) {
 }
 
 type Connection struct {
-	Alias       string `json:"alias"`
-	Service     string `json:"service"`
-	CommunityID string `json:"community_id"`
-	Name        string `json:"name"`
+	SourceNamespace string `json:"source_namespace,omitempty"`
+	Alias           string `json:"alias"`
+	Service         string `json:"service"`
+	CommunityID     string `json:"community_id"`
+	Name            string `json:"name"`
 }
 type Settings struct {
 	Retrieval   string       `json:"retrieval"`
@@ -194,11 +195,14 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 	if !regexpAlias.MatchString(alias) {
 		return Connection{}, fmt.Errorf("alias must contain 1 to 64 lowercase letters, digits, or hyphens")
 	}
+	if alias == "local" {
+		return Connection{}, fmt.Errorf("local is reserved for the project's own retrieval surface")
+	}
 	s, err := LoadSettings(root)
 	if err != nil {
 		return Connection{}, err
 	}
-	next := Connection{alias, c.URL, l.ID, l.Name}
+	next := Connection{Alias: alias, Service: c.URL, CommunityID: l.ID, Name: l.Name}
 	for _, v := range s.Connections {
 		if v.Alias == alias {
 			if v.Service == next.Service && v.CommunityID == next.CommunityID {

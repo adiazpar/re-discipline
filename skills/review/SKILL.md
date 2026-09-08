@@ -26,8 +26,17 @@ Equivalence selects a canonical target for grouped retrieval; it does not erase
 the other contribution. Compare applicability and both exact revisions first.
 A changed endpoint makes the relationship stale until reviewed again.
 
-Use `submission.review` with a concise rationale and the actual digest and policy
-version. Accept only within the user's delegated review authority. Request changes
+If identity_review is true, compare `publication.resolve` candidates, the source
+finding, and its history. Use `submission.resolve` with mode create (a distinct
+claim), revision (replace the reviewed finding content), or contribution (same
+claim and build with independent supporting evidence). Revision and contribution
+require finding_id and the current base_revision. Explain the decision. Contribution
+preserves its own history and is atomically grouped under the target on acceptance.
+Do not consolidate differing builds or conflicting conclusions as equivalent.
+
+Use `submission.review` with a concise rationale, the actual digest, policy_version,
+and resolution_version returned by the latest submission.get. A changed identity
+decision invalidates older review requests. Accept only within the user's delegated review authority. Request changes
 for fixable scope/evidence problems; reject an unsuitable contribution. The service
 enforces reviewer roles and the community's self-review policy. Do not alter local
 or server policy to make a submission pass. If the policy or base revision changed,
@@ -43,3 +52,16 @@ the user's request; a request to correct a finding normally calls for a new revi
 Offline clients remove their cached copy on their next sync. Content-free deletion
 markers prevent old snapshots or queued retries from restoring the deleted content.
 Existing backups follow the service retention policy.
+
+For claims later challenged, use `finding.assess` with the current revision,
+status (disputed, refuted, superseded, active), reason, and evidence. Superseded
+also requires an active replacement_id in this community. Disputed claims remain
+retrievable with warnings; refuted/superseded claims leave default retrieval but
+retain their history and signal warnings on matching local copies. An authorized
+review can accept a corrected content revision directly from a refuted finding;
+do not temporarily restore false content to active just to edit it. Restoring the
+same content requires an explicit active assessment supported by evidence.
+`finding.consolidate` previews or applies bounded exact-payload grouping for legacy
+duplicates. It preserves findings and histories. Similarity decisions still require
+comparison. `finding.contributions` exposes the accepted attribution and evidence
+attached to a finding. Never promise perfect semantic or truth classification.

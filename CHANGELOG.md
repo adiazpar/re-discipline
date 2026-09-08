@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0 - 2026-09-07
+
+Publication identity now belongs to the community service. Local publication
+caches can be discarded without silently turning source edits into new findings.
+Combined retrieval verifies local copies through server text fingerprints and
+reports corrections, disputes, refutations, and supersession. Exact copies retain
+source attribution; similar evidence is consolidated through revision-bound review.
+Adds server identity resolution, contribution decisions, validity assessments,
+legacy consolidation, and bounded receipt recovery without a KB download.
+Requires the corresponding community integrity service release.
+
 ## 1.7.2 - 2026-09-07
 
 Server-only retrieval is now the default for new projects and settings without

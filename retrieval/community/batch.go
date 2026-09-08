@@ -174,7 +174,7 @@ func FlushBatch(ctx context.Context, root, alias, grant string) (any, error) {
 			chunk := drafts[:n]
 			items := []BatchItem{}
 			for _, d := range chunk {
-				items = append(items, BatchItem{Key: d.ID, Document: d.Document})
+				items = append(items, BatchItem{Key: submissionKey(d), Document: d.Document})
 			}
 			var result struct {
 				Items []BatchOutcome `json:"items"`
@@ -189,7 +189,7 @@ func FlushBatch(ctx context.Context, root, alias, grant string) (any, error) {
 			}
 			stop := false
 			for _, d := range chunk {
-				item, ok := byKey[d.ID]
+				item, ok := byKey[submissionKey(d)]
 				if !ok {
 					return nil, fmt.Errorf("incomplete batch response; retry safely")
 				}
@@ -199,6 +199,7 @@ func FlushBatch(ctx context.Context, root, alias, grant string) (any, error) {
 					}
 					d.State = "submitted"
 					d.SubmissionID = item.Submission.ID
+					d.FindingID, d.Revision = item.Submission.FindingID, item.Submission.Revision
 					d.Error = ""
 					d.LastStatus = 200
 					sent++

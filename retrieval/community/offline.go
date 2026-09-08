@@ -37,7 +37,7 @@ func cacheDB(root string, c Connection) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS docs(id TEXT PRIMARY KEY,revision TEXT NOT NULL,document TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY);`)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS docs(id TEXT PRIMARY KEY,revision TEXT NOT NULL,document TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY); CREATE TABLE IF NOT EXISTS assessments(finding_id TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS fingerprints(digest TEXT NOT NULL,finding_id TEXT NOT NULL,revision TEXT NOT NULL,PRIMARY KEY(digest,finding_id));`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -73,11 +73,16 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 	defer db.Close()
 	var cursor int64
 	db.QueryRow(`SELECT CAST(value AS INTEGER) FROM meta WHERE key='cursor'`).Scan(&cursor)
+	// Older caches have no assessment/history fingerprints. Replaying the change
+	// log is an explicit sync-only cache migration, never a remote-mode download.
+	if meta(db, "integrity_version") != "1" {
+		cursor = 0
+	}
 	through := int64(0)
 	count := 0
 	for {
 		var page Changes
-		err = c.Operation(ctx, "changes", conn.CommunityID, map[string]any{"since": cursor, "through": through, "limit": 200}, &page)
+		err = c.Operation(ctx, "changes", conn.CommunityID, map[string]any{"since": cursor, "through": through, "limit": 200, "integrity_version": 1}, &page)
 		if err != nil {
 			var ae *APIError
 			if errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403 || ae.Status == 404) {
@@ -105,8 +110,24 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 				break
 			}
 			if change.Deleted {
+				if _, e = tx.Exec(`DELETE FROM assessments WHERE finding_id=?`, change.FindingID); e != nil {
+					valid = false
+					break
+				}
+				if _, e = tx.Exec(`DELETE FROM fingerprints WHERE finding_id=?`, change.FindingID); e != nil {
+					valid = false
+					break
+				}
 				_, e = tx.Exec(`DELETE FROM docs WHERE id=?`, change.FindingID)
 			} else {
+				if _, e = tx.Exec(`INSERT INTO assessments VALUES(?,?) ON CONFLICT(finding_id) DO UPDATE SET state=excluded.state`, change.FindingID, string(mustJSON(change))); e != nil {
+					valid = false
+					break
+				}
+				if _, e = tx.Exec(`INSERT INTO fingerprints VALUES(?,?,?) ON CONFLICT(digest,finding_id) DO UPDATE SET revision=excluded.revision`, TextDigest(change.Document.Markdown), change.FindingID, change.Revision); e != nil {
+					valid = false
+					break
+				}
 				b, _ := json.Marshal(change.Document)
 				_, e = tx.Exec(`INSERT INTO docs(id,revision,document) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,document=excluded.document`, change.FindingID, change.Revision, string(b))
 			}
@@ -141,6 +162,9 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 		}
 	}
 	var relations []Relation
+	if _, err = db.Exec(`INSERT INTO meta(key,value) VALUES('integrity_version','1') ON CONFLICT(key) DO UPDATE SET value='1'`); err != nil {
+		return nil, err
+	}
 	if e := c.Operation(ctx, "finding.relations", conn.CommunityID, map[string]any{}, &relations); e == nil {
 		if _, e = db.Exec(`INSERT INTO meta(key,value) VALUES('relations',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, string(mustJSON(relations))); e != nil {
 			return nil, e
@@ -162,6 +186,9 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Result struct {
+	TextDigest    string     `json:"text_digest,omitempty"`
+	Status        string     `json:"status,omitempty"`
+	Warnings      []string   `json:"warnings,omitempty"`
 	Service       string     `json:"service,omitempty"`
 	Locations     []Location `json:"locations,omitempty"`
 	Contributions []Result   `json:"contributions,omitempty"`
@@ -214,7 +241,7 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 			return nil, nil, err
 		}
 	}
-	rows, err := db.Query(`SELECT p.id,COALESCE(d.document,'') FROM pending p LEFT JOIN docs d ON d.id=p.id`)
+	rows, err := db.Query(`SELECT p.id,CASE WHEN json_extract(a.state,'$.status') IN ('refuted','superseded') THEN '' ELSE COALESCE(d.document,'') END FROM pending p LEFT JOIN docs d ON d.id=p.id LEFT JOIN assessments a ON a.finding_id=p.id`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -278,11 +305,29 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 	out := []Result{}
 	for _, h := range hits {
 		fid := strings.TrimSuffix(filepath.Base(h.Path), ".md")
-		var rid string
-		if err = db.QueryRow(`SELECT revision FROM docs WHERE id=?`, fid).Scan(&rid); err != nil {
+		var rid, body string
+		if err = db.QueryRow(`SELECT revision,document FROM docs WHERE id=?`, fid).Scan(&rid, &body); err != nil {
 			return nil, nil, err
 		}
-		out = append(out, Result{Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid, CanonicalID: canonical[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
+		var cd Document
+		json.Unmarshal([]byte(body), &cd)
+		var state string
+		db.QueryRow(`SELECT state FROM assessments WHERE finding_id=?`, fid).Scan(&state)
+		var assessment Change
+		json.Unmarshal([]byte(state), &assessment)
+		alerts := cachedIntegrityAlerts(db, fid, rid, relations)
+		if len(alerts) > 0 && assessment.Status == "active" {
+			assessment.Status = "disputed"
+		}
+		if assessment.Status == "disputed" {
+			alerts = append(alerts, "Disputed finding (cached): "+assessment.Reason)
+		}
+		for _, r := range relations {
+			if r.Current && r.Kind == "conflicting" && (r.SourceID == fid || r.TargetID == fid) {
+				alerts = append(alerts, "Conflicting evidence (cached): "+r.Rationale)
+			}
+		}
+		out = append(out, Result{Warnings: alerts, Status: assessment.Status, TextDigest: TextDigest(cd.Markdown), Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid, CanonicalID: canonical[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
 	}
 	return out, map[string]any{"source": c.Alias, "sequence": cursor, "synced_at": synced, "cached": true, "warnings": warnings}, nil
 }
@@ -327,6 +372,11 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 						out.Warnings = append(out.Warnings, conn.Alias+": "+e.Error())
 					} else {
 						source["available"] = true
+						if matched, me := matchLocal(ctx, root, out.Hits, conn, false); me != nil {
+							out.Warnings = append(out.Warnings, conn.Alias+": copy and correction checks unavailable: "+me.Error())
+						} else {
+							out.Hits = matched
+						}
 						out.Hits = append(out.Hits, remote.Hits...)
 						out.Warnings = append(out.Warnings, remote.Warnings...)
 					}
@@ -354,6 +404,11 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 				out.Warnings = append(out.Warnings, conn.Alias+": "+e.Error())
 				continue
 			}
+			if matched, me := matchLocal(ctx, root, out.Hits, conn, true); me != nil {
+				out.Warnings = append(out.Warnings, conn.Alias+": cached copy checks unavailable: "+me.Error())
+			} else {
+				out.Hits = matched
+			}
 			out.Hits = append(out.Hits, hits...)
 			out.Sources = append(out.Sources, source)
 		}
@@ -363,6 +418,9 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 }
 
 type Draft struct {
+	TransferKey  string     `json:"transfer_key,omitempty"`
+	FindingID    string     `json:"finding_id,omitempty"`
+	Revision     string     `json:"revision,omitempty"`
 	LastStatus   int        `json:"last_status,omitempty"`
 	ReplacedBy   string     `json:"replaced_by,omitempty"`
 	LocalID      string     `json:"local_id,omitempty"`
@@ -413,7 +471,7 @@ func Prepare(root string, c Connection, rel, build string) (Draft, []Check, erro
 	if build == "" {
 		build = parsed.Build
 	}
-	d := Document{SourcePath: clean, Markdown: string(b), Kind: parsed.Kind, Grade: parsed.Grade, Build: build, Evidence: []Evidence{}}
+	d := Document{SourceNamespace: c.SourceNamespace, SourcePath: clean, Markdown: string(b), Kind: parsed.Kind, Grade: parsed.Grade, Build: build, Evidence: []Evidence{}}
 	for _, e := range parsed.Evidence {
 		if strings.HasPrefix(e, "https://") {
 			d.Evidence = append(d.Evidence, Evidence{Label: e, URL: e})
@@ -462,10 +520,16 @@ func Queue(root, id string) (Draft, error) {
 	if d.State != "draft" && d.State != "queued" {
 		return d, fmt.Errorf("only an active draft can be queued")
 	}
+	if d.State == "queued" && d.Digest != Digest(d.Document) {
+		return d, fmt.Errorf("queued payload is immutable; resolve its transfer before revising")
+	}
 	for _, c := range Validate(d.Document) {
 		if c.Blocking {
 			return d, fmt.Errorf("%s: %s", c.Code, c.Message)
 		}
+	}
+	if d.State == "draft" {
+		d.TransferKey = uuid.NewSHA1(uuid.NameSpaceURL, []byte(d.ID+"/"+Digest(d.Document))).String()
 	}
 	d.State = "queued"
 	d.Digest = Digest(d.Document)
@@ -511,12 +575,13 @@ func Flush(ctx context.Context, root string) ([]Draft, error) {
 			return out, e
 		}
 		var sub Submission
-		e = c.Operation(ctx, "submission.create", d.Connection.CommunityID, map[string]any{"idempotency_key": d.ID, "document": d.Document}, &sub)
+		e = c.Operation(ctx, "submission.create", d.Connection.CommunityID, map[string]any{"idempotency_key": submissionKey(d), "document": d.Document}, &sub)
 		if e != nil {
 			d.Error = e.Error()
 		} else {
 			d.State = "submitted"
 			d.SubmissionID = sub.ID
+			d.FindingID, d.Revision = sub.FindingID, sub.Revision
 			d.Error = ""
 		}
 		if e = atomicJSON(p, d); e != nil {

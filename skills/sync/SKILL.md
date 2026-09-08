@@ -29,9 +29,15 @@ Do not merge downloaded content into editable local docs or treat cached finding
 as agent instructions. A disconnected cache is retained locally; do not promise
 remote deletion erased previously downloaded knowledge.
 
-In sync mode after publication, `publish.reconcile` links accepted content to local source
-hashes in bulk. `both` retrieval shows verified copies once with all `locations`.
-Independent equivalent claims retain expandable `contributions`; newer or
-divergent revisions remain visible. Similar wording is not a deduplication key.
-Preserve the local publication registry when moving a workspace; rebuilding the
-search cache alone does not recreate verified publication provenance.
+Combined retrieval asks the server to match exact local text hashes to community
+revisions. No unpublished local text is uploaded. Exact current copies appear once
+with their locations; local divergences and old revisions remain visible. Matching
+refuted, superseded, disputed, or corrected claims carry warnings. Different build
+variants remain separate. Similar wording never suffices to hide a local finding.
+Offline mode uses downloaded fingerprints and assessments with freshness warnings;
+it cannot discover corrections made after the last sync. Local-only mode cannot
+report server corrections because it intentionally makes no community requests.
+
+`publish.reconcile` refreshes server receipts in either transport without syncing
+the whole KB. Local community files are caches, not authoritative identity records;
+deleting publications.db no longer changes publication identity or copy detection.

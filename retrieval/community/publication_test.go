@@ -33,7 +33,7 @@ func TestPortabilityUsesRealText(t *testing.T) {
 	}
 }
 
-func TestStablePreparationReceiptRenameAndDivergence(t *testing.T) {
+func TestPreparationSurvivesLostCacheWithoutAssertingIdentity(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".re-discipline", "docs")
 	os.MkdirAll(dir, 0700)
@@ -48,71 +48,20 @@ func TestStablePreparationReceiptRenameAndDivergence(t *testing.T) {
 	atomicJSON(draftPath(root, d.ID), d)
 	again, _, err := Prepare(root, c, "docs/time.md", "build one")
 	if err != nil || again.ID != d.ID || again.Document.Evidence[0].Excerpt == "" {
-		t.Fatalf("preparation lost identity or reviewed edits: %+v %v", again, err)
+		t.Fatal("preparation lost cached edits")
 	}
-	d.State = "submitted"
-	d.SubmissionID = uuid.NewString()
-	d.Digest = Digest(d.Document)
-	atomicJSON(draftPath(root, d.ID), d)
-	fid, rid := uuid.NewString(), uuid.NewString()
-	db, _ := cacheDB(root, c)
-	db.Exec(`INSERT INTO docs VALUES(?,?,?)`, fid, rid, string(mustJSON(d.Document)))
-	db.Exec(`INSERT INTO meta VALUES('cursor','1')`)
-	db.Close()
-	if _, err = Reconcile(root, c, nil); err != nil {
-		t.Fatal(err)
+	os.RemoveAll(filepath.Join(root, ".re-discipline", "community"))
+	fresh, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || fresh.ID != d.ID {
+		t.Fatal("retry identity depends on local state")
 	}
-	unchanged, _, err := Prepare(root, c, "docs/time.md", "build one")
-	if err != nil || unchanged.State != "unchanged" {
-		t.Fatalf("unchanged: %+v %v", unchanged, err)
+	os.WriteFile(filepath.Join(dir, "time.md"), append(body, []byte("\nChanged claim.")...), 0600)
+	edited, _, err := Prepare(root, c, "docs/time.md", "build one")
+	if err != nil || edited.ID == d.ID || edited.Document.FindingID != "" || edited.LocalID != "" {
+		t.Fatal("client asserted publication identity")
 	}
-	hits := []Result{{Source: "local", Path: "docs/time.md"}, {Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid}}
-	got, err := collapseCopies(root, hits, 8)
-	if err != nil || len(got) != 1 || len(got[0].Locations) != 2 {
-		t.Fatalf("verified copies not collapsed: %+v %v", got, err)
-	}
-	hits[1].Revision = uuid.NewString()
-	got, _ = collapseCopies(root, hits, 8)
-	if len(got) != 2 {
-		t.Fatal("a newer remote revision was hidden")
-	}
-	db, _ = cacheDB(root, c)
-	db.Exec(`UPDATE docs SET revision=? WHERE id=?`, hits[1].Revision, fid)
-	db.Close()
-	conflict, _, err := Prepare(root, c, "docs/time.md", "build one")
-	if err != nil || conflict.State != "conflict" {
-		t.Fatalf("newer community content marked unchanged: %+v %v", conflict, err)
-	}
-	db, _ = cacheDB(root, c)
-	db.Exec(`DELETE FROM docs WHERE id=?`, fid)
-	db.Close()
-	withdrawn, _, err := Prepare(root, c, "docs/time.md", "build one")
-	if err != nil || withdrawn.State != "withdrawn" {
-		t.Fatal("deleted publication marked unchanged")
-	}
-	db, _ = cacheDB(root, c)
-	db.Exec(`INSERT INTO docs VALUES(?,?,?)`, fid, rid, string(mustJSON(d.Document)))
-	db.Close()
-	hits[1].Revision = rid
-	os.Rename(filepath.Join(dir, "time.md"), filepath.Join(dir, "clock.md"))
-	renamed, _, err := Prepare(root, c, "docs/clock.md", "build one")
-	if err != nil || renamed.LocalID != d.LocalID || renamed.State != "unchanged" {
-		t.Fatalf("rename lost lineage: %+v %v", renamed, err)
-	}
-	os.WriteFile(filepath.Join(dir, "clock.md"), append(body, []byte("\nA local revision.")...), 0600)
-	updated, _, err := Prepare(root, c, "docs/clock.md", "build one")
-	if err != nil || updated.Document.FindingID != fid || updated.Document.BaseRevision != rid || updated.ID == d.ID {
-		t.Fatalf("update did not use receipt: %+v %v", updated, err)
-	}
-	hits[0].Path = "docs/clock.md"
-	got, _ = collapseCopies(root, hits, 8)
-	if len(got) != 2 {
-		t.Fatal("local changes were hidden")
-	}
-	os.WriteFile(filepath.Join(dir, "copy.md"), body, 0600)
-	copy, _, err := Prepare(root, c, "docs/copy.md", "build one")
-	if err != nil || copy.LocalID == d.LocalID {
-		t.Fatal("a copy asserted another finding's identity")
+	if _, err = os.Stat(filepath.Join(root, ".re-discipline", "community", "publications.db")); !os.IsNotExist(err) {
+		t.Fatal("client created an authoritative ledger")
 	}
 }
 

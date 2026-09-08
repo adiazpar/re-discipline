@@ -2,7 +2,6 @@ package community
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -40,22 +39,16 @@ func Revise(ctx context.Context, root, id string) (Draft, error) {
 			return d, fmt.Errorf("submission is still awaiting review; resolve it before creating another version")
 		}
 		if sub.State == "accepted" {
-			db, e := publicationDB(root)
-			if e != nil {
-				return d, e
+			if sub.FindingID == "" || sub.Revision == "" {
+				return d, fmt.Errorf("service did not return authoritative publication identity")
 			}
-			e = db.QueryRow(`SELECT finding_id,revision FROM receipts WHERE service=? AND community=? AND local_id=?`, d.Connection.Service, d.Connection.CommunityID, d.LocalID).Scan(&d.Document.FindingID, &d.Document.BaseRevision)
-			db.Close()
-			if e == sql.ErrNoRows {
-				return d, fmt.Errorf("reconcile accepted receipts before revising this finding")
-			}
-			if e != nil {
-				return d, e
-			}
+			d.Document.FindingID, d.Document.BaseRevision = sub.FindingID, sub.Revision
+
 		}
 	}
 	old := d
 	d.ID = uuid.NewString()
+	d.TransferKey = ""
 	d.State = "draft"
 	d.SubmissionID = ""
 	d.Digest = ""

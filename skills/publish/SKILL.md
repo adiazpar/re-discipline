@@ -34,8 +34,11 @@ Publication has an explicit export boundary. Never upload a project, the entire
    or conflicting accepted revisions with `finding.relate`.
    Use `publish.evidence` for an explicitly selected local text range; it never
    traverses dependencies. Included supporting-evidence sections and HTTPS citations
-   are packaged without rewriting. Updates use the last verified receipt's base
-   revision and must reconcile any conflict with newer community content.
+   are packaged without rewriting. The server resolves document identity. Use
+   `publication.resolve` on the portable draft to inspect source matches and
+   similarity candidates. A missing local ledger never means a finding is new.
+   For an explicit update, compare `finding.get` and supply its finding_id and
+   base_revision through `publish.update`; never blindly adopt a newer base.
 5. Show the concrete destination, proposed claims, evidence, and excluded material.
    When publication is already authorized, proceed without another confirmation.
    Otherwise obtain approval for this concrete package before queuing/sending it.
@@ -49,7 +52,7 @@ Publication has an explicit export boundary. Never upload a project, the entire
    `publish.batch.export` produces a file for the optional dashboard batch importer.
 6. Report submission IDs and actual server state. Queued or needs_review is not
    accepted. Reconcile accepted receipts with `publish.reconcile` after transfer;
-   this synchronizes once and matches exact payloads in bulk. Use `submission.get`
+   this fetches server receipts in bounded batches without downloading the KB. Use `submission.get`
    for exceptional states rather than polling every document. Do not repeatedly resubmit rejected
    content; use `publish.revise` to create an editable successor with a new key,
    then address the feedback. The replaced local draft leaves the queue. Resolve
@@ -63,6 +66,12 @@ Spend model context on ambiguous scope or claims, not file transport, unchanged
 documents, or repeated status calls. Trusted imports use deterministic validation;
 automated communities retain their configured review budget and policy gates.
 
-When `connections` reports `retrieval: "remote"`, use `submission.get` to check
-publication status. `publish.reconcile` requires full synchronization and is blocked
-by server-only mode; do not enable downloads merely to reconcile receipts.
+`publish.reconcile` works in both remote and sync modes. Local draft files are
+preparation caches; publications.db is no longer read or created. The server
+registers source aliases and returns finding IDs and revision receipts. Similar
+imports and missing-base revisions enter identity review, even for trusted users.
+Use the review workflow to create a distinct finding, revise an existing finding,
+or append independently attributed evidence. A renamed and edited document needs
+an explicit server identity decision; do not infer identity from a path hash.
+`source.set` persists an optional document source_namespace for multiple source projects for the
+same publisher/community. Use a stable portable project label, never a machine path.

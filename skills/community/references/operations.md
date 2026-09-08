@@ -11,6 +11,7 @@ Local client actions:
 | `connections` | none |
 | `login.start`, `login.finish`, `logout` | `service` |
 | `connect` | `service`, `community`, optional new `alias`, optional `retrieval`: remote (default when unset) or sync; remote avoids the initial KB download and persists project-wide |
+| `source.set` | `alias`, `data:{namespace:"portable-project-label"}`; persists the source namespace outside the disposable cache; leave empty for existing legacy source mappings |
 | `disconnect` | `alias`; retains the downloaded cache |
 | `mode.set` | `mode`: local, external, both |
 | `retrieval.set` | `retrieval`: remote (server search, no KB cache) or sync (full offline cache); independent of source mode, persisted per project |
@@ -24,7 +25,7 @@ Local client actions:
 | `publish.batch.prepare` | `alias`, optional `build` override, `data:{paths:["docs/...md"]}`; returns compact per-path preflight |
 | `publish.batch.queue`, `publish.batch.export` | optional `alias`, `data:{draft_ids:[UUID]}`; export queued drafts for one destination |
 | `publish.batch.flush` | `alias`, optional `data:{import_grant:UUID}`; compact resumable batch transfer |
-| `publish.reconcile` | `alias`; sync and verify accepted receipts; legacy adoption optionally takes `data:{sources:[{draft_id,source_digest}]}` with original SHA256 hashes |
+| `publish.reconcile` | `alias`; refresh disposable receipts from the server in bounded batches; no KB download |
 | `publish.evidence` | `draft_id`, `data:{path,label,start,end}`; explicitly selected project text range, 1–1000 lines, at most 64 KiB excerpt |
 
 Service actions and their `data` payloads:
@@ -48,14 +49,21 @@ Service actions and their `data` payloads:
 | `import.list`, `import.revoke` | `{}` or `{id}`; allowances are scoped to one community and publisher |
 | `submission.list` | `{state?}`; contributor sees own submissions, maintainers see the queue |
 | `submission.get` | `{id}` |
-| `submission.review` | `{id,digest,policy_version,decision,rationale}`; decision accept, reject, request_changes |
-| `finding.get`, `finding.history` | `{id}` |
+| `submission.review` | `{id,digest,policy_version,resolution_version,decision,rationale}`; decision accept, reject, request_changes |
+| `finding.get`, `finding.history` | `{id,before?:sequence}`; history pages contain at most 100 revisions; before the last returned sequence gets the next page; revisions include status, reason, replacement_id and assessment_evidence |
+| `publication.resolve` | `{document}`; read server identity, current revision and similarity candidates before publishing |
+| `publication.receipts` | `{keys:[UUID]}`; at most 200 of the signed-in publisher's retry keys; compact server receipts |
+| `submission.resolve` | owner/maintainer: `{id,mode, finding_id?,base_revision?,rationale}`; mode create, revision, contribution; target and base required for the latter two; returns incremented resolution_version |
+| `finding.match` | `{digests:[SHA256]}`; at most 50 exact text hashes; returns current validity, matched/current revision and replacement, including old text matches |
+| `finding.assess` | owner/maintainer: `{id,revision,status,reason,evidence:[{label,url?,excerpt?}],replacement_id?}`; status active, disputed, refuted, superseded; superseded requires replacement |
+| `finding.consolidate` | owner/maintainer: `{apply:false}` previews exact payload groups; true records up to 200 revision-pinned relationships; repeat while more_possible |
+| `finding.contributions` | `{id,after?:submission_id}`; pages contain at most 200 rows; after the last returned submission_id gets the next page; accepted attached copies with publisher attribution and evidence |
 | `finding.candidates` | `{document}`; deterministic topic suggestions, no model calls or automatic merging |
 | `finding.relations` | `{id?:UUID}`; accepted revision comparisons; `current:false` means an endpoint changed |
 | `finding.relate` | maintainer/owner: `{source_id,target_id,source_revision,target_revision,kind,rationale}`; kind equivalent, related, conflicting, separate. Equivalent uses target as canonical and preserves both contributions. Separate removes this directed relationship. |
 | `finding.withdraw` | `{id,revision,reason}`; permanently erases finding content, submissions, reviews, and server caches; retains content-free sync markers |
 | `query` | `{query,limit?,kind?,grade?}` |
-| `changes`, `export` | `{since:0,through:0,limit:200}`; follow `more`, pin through from first page |
+| `changes`, `export` | `{since:0,through:0,limit:200,integrity_version:1}`; follow `more`, pin through from first page |
 | `usage`, `audit.list` | `{}` |
 | `token.list` | `{}`; service only |
 | `token.revoke` | `{id}`; permanently deletes the device credential; service only |
@@ -64,7 +72,7 @@ Visibility is public, unlisted, or private. Policy mode is maintainer, trusted,
 or automated. Community creation, storage, memberships, and model reviews have
 operator-configured limits; report quota feedback without retrying in a loop.
 
-Publication document:
+Publication document (optional source_namespace is a stable portable source-project label):
 
 ```json
 {
@@ -88,7 +96,7 @@ needs_review, changes_requested, rejected, or conflict. Accepted content alone
 enters community search. A changed document requires a new submission UUID.
 
 `both` retrieval collapses byte-equivalent local/community versions only through
-verified publication receipts, keeping all `locations`. Confirmed equivalent
+server-certified exact text matches, keeping all `locations`. Confirmed equivalent
 contributor claims have expandable `contributions`; evidence lineages are distinct.
 Changed source files, different remote revisions, and stale comparisons remain
 visible. Similar titles alone never suppress results. A renamed file retains its

@@ -29,6 +29,27 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return nil, err
 	}
 	switch p.Action {
+	case "source.set":
+		var v struct {
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(p.Data, &v); err != nil {
+			return nil, err
+		}
+		if len(v.Namespace) > 200 || strings.TrimSpace(v.Namespace) != v.Namespace || strings.ContainsAny(v.Namespace, "\r\n") {
+			return nil, fmt.Errorf("use a portable source project label of at most 200 characters")
+		}
+		s, err := LoadSettings(root)
+		if err != nil {
+			return nil, err
+		}
+		for i := range s.Connections {
+			if s.Connections[i].Alias == p.Alias {
+				s.Connections[i].SourceNamespace = v.Namespace
+				return s, SaveSettings(root, s)
+			}
+		}
+		return nil, fmt.Errorf("unknown connection alias")
 	case "connections":
 		return LoadSettings(root)
 	case "retrieval.set":
@@ -104,7 +125,7 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 					issues = append(issues, map[string]string{"draft_id": id, "error": "preview and queue this draft before export"})
 					continue
 				}
-				items = append(items, BatchItem{Key: d.ID, Document: d.Document})
+				items = append(items, BatchItem{Key: submissionKey(d), Document: d.Document})
 			}
 		}
 		return map[string]any{"items": items, "issues": issues, "destination": destination}, nil
@@ -215,9 +236,6 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 				return nil, e
 			}
 		}
-		if _, e := client.Sync(ctx, root, conn); e != nil {
-			return nil, e
-		}
 		return Reconcile(root, conn, v.Sources)
 	case "login.start":
 		return client.LoginStart(ctx)
@@ -297,7 +315,7 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"action":    map[string]any{"type": "string", "description": "connections, connect, disconnect, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, submission.create/batch/list/get/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate, query, changes, export, usage, audit.list, token.list/revoke"},
+		"action":    map[string]any{"type": "string", "description": "connections, connect, disconnect, source.set, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, publication.resolve/receipts, submission.create/batch/list/get/review/resolve, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, changes, export, usage, audit.list, token.list/revoke"},
 		"retrieval": map[string]any{"type": "string", "enum": []string{"remote", "sync"}, "description": "Persistent project-wide community transport; remote queries the server without a KB download, sync maintains an offline cache. Use with connect or retrieval.set."},
 		"service":   map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
 }

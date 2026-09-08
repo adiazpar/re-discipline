@@ -46,27 +46,35 @@ type Evidence struct {
 }
 
 type Document struct {
-	FindingID    string     `json:"finding_id,omitempty"`
-	BaseRevision string     `json:"base_revision,omitempty"`
-	SourcePath   string     `json:"source_path"`
-	Markdown     string     `json:"markdown"`
-	Kind         string     `json:"kind"`
-	Grade        string     `json:"grade"`
-	Build        string     `json:"build"`
-	Evidence     []Evidence `json:"evidence"`
-	Supersedes   string     `json:"supersedes,omitempty"`
+	SourceNamespace string     `json:"source_namespace,omitempty"`
+	FindingID       string     `json:"finding_id,omitempty"`
+	BaseRevision    string     `json:"base_revision,omitempty"`
+	SourcePath      string     `json:"source_path"`
+	Markdown        string     `json:"markdown"`
+	Kind            string     `json:"kind"`
+	Grade           string     `json:"grade"`
+	Build           string     `json:"build"`
+	Evidence        []Evidence `json:"evidence"`
+	Supersedes      string     `json:"supersedes,omitempty"`
 }
 
 type Submission struct {
-	ID            string   `json:"id"`
-	CommunityID   string   `json:"community_id"`
-	Author        string   `json:"author"`
-	State         string   `json:"state"`
-	Digest        string   `json:"digest"`
-	Document      Document `json:"document"`
-	Checks        []Check  `json:"checks"`
-	PolicyVersion int      `json:"policy_version"`
-	CreatedAt     string   `json:"created_at"`
+	ResolutionVersion    int      `json:"resolution_version"`
+	ContributionTarget   string   `json:"contribution_target,omitempty"`
+	ContributionRevision string   `json:"contribution_revision,omitempty"`
+	BaseRevision         string   `json:"base_revision,omitempty"`
+	IdentityReview       bool     `json:"identity_review,omitempty"`
+	FindingID            string   `json:"finding_id,omitempty"`
+	Revision             string   `json:"revision,omitempty"`
+	ID                   string   `json:"id"`
+	CommunityID          string   `json:"community_id"`
+	Author               string   `json:"author"`
+	State                string   `json:"state"`
+	Digest               string   `json:"digest"`
+	Document             Document `json:"document"`
+	Checks               []Check  `json:"checks"`
+	PolicyVersion        int      `json:"policy_version"`
+	CreatedAt            string   `json:"created_at"`
 }
 
 type Check struct {
@@ -75,12 +83,17 @@ type Check struct {
 	Blocking bool   `json:"blocking"`
 }
 type Change struct {
-	Author    string   `json:"author,omitempty"`
-	Sequence  int64    `json:"sequence"`
-	FindingID string   `json:"finding_id"`
-	Revision  string   `json:"revision"`
-	Deleted   bool     `json:"deleted"`
-	Document  Document `json:"document"`
+	Warnings           []string   `json:"warnings,omitempty"`
+	AssessmentEvidence []Evidence `json:"assessment_evidence,omitempty"`
+	Status             string     `json:"status,omitempty"`
+	Reason             string     `json:"reason,omitempty"`
+	ReplacementID      string     `json:"replacement_id,omitempty"`
+	Author             string     `json:"author,omitempty"`
+	Sequence           int64      `json:"sequence"`
+	FindingID          string     `json:"finding_id"`
+	Revision           string     `json:"revision"`
+	Deleted            bool       `json:"deleted"`
+	Document           Document   `json:"document"`
 }
 type Changes struct {
 	Changes []Change `json:"changes"`
@@ -137,7 +150,7 @@ func Validate(d Document) []Check {
 	}
 	// Inspect actual fields, not JSON escapes: a newline after "Notes:" and
 	// the final "s:/" in an HTTPS URL are not Windows paths.
-	fields := []string{d.SourcePath, d.Markdown, d.Build, d.Kind, d.Grade, d.Supersedes}
+	fields := []string{d.SourceNamespace, d.SourcePath, d.Markdown, d.Build, d.Kind, d.Grade, d.Supersedes}
 	for _, e := range d.Evidence {
 		fields = append(fields, e.Label, e.URL, e.Excerpt)
 	}

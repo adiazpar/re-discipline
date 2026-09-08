@@ -32,6 +32,8 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 		switch req.Action {
 		case "community.get":
 			json.NewEncoder(w).Encode(Library{ID: cid, Slug: "doom", Name: "DOOM"})
+		case "finding.match":
+			json.NewEncoder(w).Encode([]FindingMatch{})
 		case "query":
 			if code != 200 {
 				w.WriteHeader(code)
@@ -89,7 +91,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 	mu.Lock()
 	before := len(calls)
 	mu.Unlock()
-	if before != 2 {
+	if before != 3 {
 		t.Fatalf("offline/local/sync attempted network access: %d", before)
 	}
 	for _, code := range []int{403, 503} {
