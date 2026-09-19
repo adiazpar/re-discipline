@@ -23,7 +23,11 @@ func matchLocal(ctx context.Context, root string, hits []Result, c Connection, c
 		if err != nil {
 			continue
 		}
-		h.TextDigest = TextDigest(string(b))
+		current := TextDigest(string(b))
+		if h.TextDigest != "" && h.TextDigest != current {
+			return hits, fmt.Errorf("local source changed after indexing; repeat query")
+		}
+		h.TextDigest = current
 		digests = append(digests, h.TextDigest)
 		path := ""
 		if h.Kind != "ops" && strings.HasPrefix(h.Path, "docs/") && !strings.HasPrefix(h.Path, "docs/ops/") {

@@ -8,10 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/adiazpar/re-discipline/retrieval/semantic"
+
 	"github.com/zalando/go-keyring"
 )
 
 type Command struct {
+	Root      string          `json:"root,omitempty"`
 	Retrieval string          `json:"retrieval,omitempty"`
 	Action    string          `json:"action"`
 	Service   string          `json:"service,omitempty"`
@@ -25,10 +28,38 @@ type Command struct {
 }
 
 func Execute(ctx context.Context, root string, p Command) (any, error) {
+	if p.Root != "" {
+		var err error
+		root, err = ProjectRoot(p.Root)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := validateRetrieval(p.Retrieval); err != nil {
 		return nil, err
 	}
+	if p.Action == "publish.export" {
+		p.Action = "publish.batch.export"
+	}
+	if p.Action == "publish.queue" && p.DraftID == "" {
+		p.Action = "publish.batch.queue"
+	}
 	switch p.Action {
+	case "status", "assistance.status":
+		return AssistanceInfo(root)
+	case "assistance.set":
+		var config semantic.Config
+		if err := json.Unmarshal(p.Data, &config); err != nil {
+			return nil, err
+		}
+		config, err := config.Normalized()
+		if err != nil {
+			return nil, err
+		}
+		if err = atomicJSON(semantic.ConfigPath(root), config); err != nil {
+			return nil, err
+		}
+		return AssistanceInfo(root)
 	case "source.set":
 		var v struct {
 			Namespace string `json:"namespace"`
@@ -76,7 +107,7 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 	case "publish.queue":
 		return Queue(root, p.DraftID)
 	case "publish.flush":
-		return Flush(ctx, root)
+		return FlushBatch(ctx, root, p.Alias, "")
 	case "publish.batch.flush":
 		var v struct {
 			ImportGrant string `json:"import_grant"`
@@ -167,6 +198,9 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 			return nil, e
 		}
 		d.Document = doc
+		if d.Projection != nil {
+			d.Projection.NeedsReview = false
+		}
 		return map[string]any{"draft": d, "checks": Validate(doc)}, atomicJSON(draftPath(root, d.ID), d)
 	}
 	settings, err := LoadSettings(root)
@@ -282,11 +316,19 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		if conn.Alias == "" {
 			return nil, fmt.Errorf("publication requires a connected alias")
 		}
-		d, checks, e := Prepare(root, conn, p.Path, p.Build)
-		if e != nil {
-			return nil, e
+		if len(p.Data) > 0 {
+			var v struct {
+				Paths   []string `json:"paths"`
+				Offline bool     `json:"offline"`
+			}
+			if err := json.Unmarshal(p.Data, &v); err != nil {
+				return nil, err
+			}
+			if len(v.Paths) > 0 {
+				return PrepareSelected(ctx, root, conn, v.Paths, p.Build, v.Offline)
+			}
 		}
-		return map[string]any{"draft": d, "checks": checks, "draft_path": draftPath(root, d.ID), "uploaded": false}, nil
+		return PrepareSelected(ctx, root, conn, []string{p.Path}, p.Build, false)
 	default:
 		var out any
 		var payload any = map[string]any{}
@@ -315,7 +357,8 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
-		"action":    map[string]any{"type": "string", "description": "connections, connect, disconnect, source.set, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/list/evidence/reconcile, publish.batch.prepare/queue/flush/export, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, publication.resolve/receipts, submission.create/batch/list/get/review/resolve, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, changes, export, usage, audit.list, token.list/revoke"},
+		"root":      map[string]any{"type": "string", "description": "Absolute active project root; use it when calling through a plugin."},
+		"action":    map[string]any{"type": "string", "description": "status, assistance.status/set, connections, connect, disconnect, source.set, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/export/list/reconcile, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, publication.resolve/receipts, submission.create/list/get/packet/review/resolve, health.list/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, changes, export, usage, audit.list, token.list/revoke"},
 		"retrieval": map[string]any{"type": "string", "enum": []string{"remote", "sync"}, "description": "Persistent project-wide community transport; remote queries the server without a KB download, sync maintains an offline cache. Use with connect or retrieval.set."},
 		"service":   map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
 }

@@ -109,13 +109,8 @@ func TestPreparationExcludesOpsAndTraversal(t *testing.T) {
 	if d.State != "draft" {
 		t.Fatal(d.State)
 	}
-	if _, e = Queue(root, d.ID); e == nil {
-		t.Fatal("missing evidence should block queue")
-	}
-	d.Document.Evidence = portable().Evidence
-	atomicJSON(draftPath(root, d.ID), d)
 	if _, e = Queue(root, d.ID); e != nil {
-		t.Fatal(e)
+		t.Fatalf("a scoped claim must not require uploaded evidence: %v", e)
 	}
 }
 func TestOfflineQueueIdempotency(t *testing.T) {

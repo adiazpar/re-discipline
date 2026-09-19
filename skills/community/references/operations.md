@@ -1,14 +1,19 @@
 # Community operations
 
-All requests use `{action, service?, alias?, community?, data?}`. A connected
+All requests use `{action, root?, service?, alias?, community?, data?}`. A connected
 `alias` supplies service and community automatically. `service` is an HTTPS origin.
 `community` accepts a UUID or slug. Service mutations require sign-in.
+
+Pass the absolute active project `root` in plugin tool calls. `status` reports the
+effective root, source configuration and optional assistance availability.
 
 Local client actions:
 
 | Action | Fields |
 |---|---|
 | `connections` | none |
+| `status`, `assistance.status` | effective project, sources and provider availability; never credentials |
+| `assistance.set` | `data:{enabled:true}`; explicit project opt-in, ignored local configuration; false restores ordinary workflows |
 | `login.start`, `login.finish`, `logout` | `service` |
 | `connect` | `service`, `community`, optional new `alias`, optional `retrieval`: remote (default when unset) or sync; remote avoids the initial KB download and persists project-wide |
 | `source.set` | `alias`, `data:{namespace:"portable-project-label"}`; persists the source namespace outside the disposable cache; leave empty for existing legacy source mappings |
@@ -17,8 +22,9 @@ Local client actions:
 | `retrieval.set` | `retrieval`: remote (server search, no KB cache) or sync (full offline cache); independent of source mode, persisted per project |
 | `sync` | `alias`; downloads accepted knowledge, no draft publication; blocked in remote retrieval mode |
 | `dashboard` | `alias` or `service`; returns a URL to open |
-| `publish.prepare` | `alias`, `path`: docs/...md, `build` |
-| `publish.preview`, `publish.queue` | `draft_id` |
+| `publish.prepare` | `alias`, `data:{paths:["docs/...md"],offline?:true}`, optional `build`; one route for selected files |
+| `publish.preview` | `draft_id`; includes local-only projection review details |
+| `publish.queue`, `publish.export` | `data:{draft_ids:[UUID]}`, optional alias; export only queued drafts to one destination |
 | `publish.revise` | `draft_id`; creates a linked editable version of a finalized or definitively invalid draft. Resolve in-flight transfers with their original keys first. |
 | `publish.update` | `draft_id`, `data`: complete replacement document; unqueued drafts only |
 | `publish.list`, `publish.flush` | none; flush sends all queued drafts to their recorded destinations |
@@ -43,13 +49,16 @@ Service actions and their `data` payloads:
 | `invite.list` | `{}` |
 | `invite.revoke` | `{id}`; permanently deletes the invitation |
 | `invite.redeem` | `{token}`; service only, community not required |
-| `submission.create` | `{idempotency_key:<UUID>,document:<below>}`; prefer the local draft pipeline |
+| `submission.create` | `{items:[{idempotency_key,document}]}`; one or many items, internal chunks at most 50 / 2 MiB; legacy single `{idempotency_key,document}` remains accepted |
 | `submission.batch` | `{items:[{idempotency_key,document}],import_grant?:UUID}`; at most 50 items and 2 MiB request; independent outcomes, safe retries |
 | `import.create` | owner only: `{user_id?:UUID,count,bytes,hours}`; trusted publisher, 1–24 hours, bounded by community storage/count caps |
 | `import.list`, `import.revoke` | `{}` or `{id}`; allowances are scoped to one community and publisher |
-| `submission.list` | `{state?}`; contributor sees own submissions, maintainers see the queue |
+| `submission.list` | `{group:"attention"|"completed",after?:UUID}` returns `{items,next}`; legacy `{state?}` returns an array; contributor sees own drafts |
+| `submission.packet` | `{id}`; permitted comparisons, proposed plan and stale-review token |
+| `health.list` | reviewers only: `{after?:string,limit?:number}` returns `{items,next,progress}`; whole inventory progress includes incomplete work |
+| `health.review` | reviewers only: `{id,decision:"combine"|"dismiss",rationale}`; combine applies only to current accepted equivalent claims |
 | `submission.get` | `{id}` |
-| `submission.review` | `{id,digest,policy_version,resolution_version,decision,rationale}`; decision accept, reject, request_changes |
+| `submission.review` | `{id,digest,policy_version,resolution_version,decision,rationale?,packet_token?,plan?}`; decision accept, reject, request_changes |
 | `finding.get`, `finding.history` | `{id,before?:sequence}`; history pages contain at most 100 revisions; before the last returned sequence gets the next page; revisions include status, reason, replacement_id and assessment_evidence |
 | `publication.resolve` | `{document}`; read server identity, current revision and similarity candidates before publishing |
 | `publication.receipts` | `{keys:[UUID]}`; at most 200 of the signed-in publisher's retry keys; compact server receipts |
@@ -112,3 +121,22 @@ preferring the caller's own binding; ambiguous shared bindings remain separate.
 Only relative promoted-document paths and hashes are sent, never local bodies.
 Offline matching uses downloaded exact fingerprints; unmatched variants remain
 separate until a server comparison is possible.
+
+## Claims and assistance contract
+
+New publication contains claims and complete applicability, not a required evidence
+package. The `evidence` array and assessment evidence are optional legacy fields.
+Removed local research is never included in export. `publish.update` acknowledges
+a reviewed complete projection; `publish.queue` refuses an unreviewed removal.
+Batch action names remain compatibility aliases; use the unified route above.
+
+A review packet plan has `{mode,finding_id?,base_revision?,effect}`. The server
+validates its captured candidates, digest, policy and revisions under the same
+lock as acceptance. Modes are internal publication effects, not user workflow
+choices. Routine clean acceptance receives a factual audit rationale; changes and
+rejections need an explanation. Models never override these gates.
+
+The community policy's optional `assistance:true` enables service-side advice when
+the operator also configured Jev. Project assistance independently enables the
+shared local/community query path. A key alone enables neither. See
+[assistance](assistance.md) for data boundaries, defaults and evaluation limits.

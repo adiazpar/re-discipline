@@ -238,7 +238,7 @@ starts, answers, exits.
 ### Community integrity
 
 The community service owns source identity, immutable revisions, accepted copy
-attribution, and evidence-backed validity assessments. Local publication files are
+attribution, and reasoned validity assessments. Local publication files are
 rebuildable caches. Combined retrieval uses server-certified exact text matches to
 collapse local/community copies and warn about old or refuted local claims.
 Server source mappings also group portability-edited variants while retaining the
@@ -246,3 +246,17 @@ published version and marking the differing local text as unverified.
 Similar contributions require an explicit server review decision; they are never
 silently merged on wording alone. All integrity operations are available through
 the community tool; see the operation reference in the community skill.
+
+## Claims and optional assistance
+
+Publication shares concise claims, complete applicability and attribution; private
+research stays local. Use one `publish.prepare` route for selected files and the
+single Publish action in the dashboard. The review queue integrates overlap
+comparisons and background community health. Existing histories remain available.
+
+Optional Jev assistance is built into ordinary local/community queries, selection
+and review. It is disabled by default, does not require plugin users to install a
+provider, and never establishes truth or permission. Read the
+[setup and data contract](skills/community/references/assistance.md).
+Always pass the active project `root` in plugin tools; `status` diagnoses the
+selected workspace and source configuration.

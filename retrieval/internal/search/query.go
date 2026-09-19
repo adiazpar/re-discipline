@@ -12,23 +12,27 @@ import (
 
 // Hit is one ranked query result.
 type Hit struct {
-	Path     string   `json:"path"`
-	Title    string   `json:"title"`
-	Snippet  string   `json:"snippet"`
-	Status   string   `json:"status,omitempty"`
-	Kind     string   `json:"kind,omitempty"`
-	Grade    string   `json:"grade,omitempty"`
-	Evidence []string `json:"evidence,omitempty"`
+	Build      string   `json:"build,omitempty"`
+	TextDigest string   `json:"text_digest,omitempty"`
+	Path       string   `json:"path"`
+	Title      string   `json:"title"`
+	Snippet    string   `json:"snippet"`
+	Status     string   `json:"status,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Grade      string   `json:"grade,omitempty"`
+	Evidence   []string `json:"evidence,omitempty"`
 }
 
 // QueryOptions carries optional constraints for QueryOpts. The zero
 // value means "current default behavior": limit 8, no filtering.
 type QueryOptions struct {
-	Sources string // local, external, or both; consumed by the community client
-	Offline bool   // avoid remote requests; consumed by the community client
-	Limit   int    // <= 0 means 8
-	Kind    string // filter to this kind (fact|ops|reference); empty = no filter
-	Grade   string // filter to this grade (direct|inferred|reported); empty = no filter
+	Root       string
+	Assistance string // configured (default) or off; provider is always optional
+	Sources    string // local, external, or both; consumed by the community client
+	Offline    bool   // avoid remote requests; consumed by the community client
+	Limit      int    // <= 0 means 8
+	Kind       string // filter to this kind (fact|ops|reference); empty = no filter
+	Grade      string // filter to this grade (direct|inferred|reported); empty = no filter
 }
 
 // BM25 column weights for the three indexed columns (title, body,
@@ -135,6 +139,7 @@ func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, err
 		       snippet(docs, 1, '«', '»', '…', 40),
 		       COALESCE(docmeta.evidence, ''),
 		       COALESCE(docmeta.idents, ''),
+		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
 		       bm25(docs, %v, %v, %v) AS score
 		FROM docs LEFT JOIN docmeta ON docmeta.path = docs.path
 		WHERE docs MATCH ?`, weightTitle, weightBody, weightIdents)
@@ -167,7 +172,7 @@ func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, err
 		var h Hit
 		var evidence, declared string
 		var score float64
-		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &score); err != nil {
+		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &score); err != nil {
 			return nil, match, warnings, err
 		}
 		if evidence != "" {

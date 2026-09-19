@@ -186,6 +186,8 @@ func (c *Client) Sync(ctx context.Context, root string, conn Connection) (any, e
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Result struct {
+	Build         string     `json:"build,omitempty"`
+	Relevance     *float64   `json:"relevance,omitempty"`
 	Versions      []Result   `json:"versions,omitempty"`
 	TextDigest    string     `json:"text_digest,omitempty"`
 	Status        string     `json:"status,omitempty"`
@@ -206,9 +208,11 @@ type Result struct {
 	URL           string     `json:"url,omitempty"`
 }
 type QueryResult struct {
-	Hits     []Result         `json:"hits"`
-	Warnings []string         `json:"warnings"`
-	Sources  []map[string]any `json:"sources"`
+	Root       string            `json:"root,omitempty"`
+	Assistance *AssistanceStatus `json:"assistance,omitempty"`
+	Hits       []Result          `json:"hits"`
+	Warnings   []string          `json:"warnings"`
+	Sources    []map[string]any  `json:"sources"`
 }
 
 func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Result, map[string]any, error) {
@@ -303,6 +307,31 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 	if _, err = db.Exec(`DELETE FROM pending; INSERT INTO meta(key,value) VALUES('materialized','true') ON CONFLICT(key) DO UPDATE SET value='true'`); err != nil {
 		return nil, nil, err
 	}
+	seen := map[string]bool{}
+	for _, hit := range hits {
+		seen[strings.TrimSuffix(filepath.Base(hit.Path), ".md")] = true
+	}
+	for _, hit := range append([]engine.Hit{}, hits...) {
+		fid := canonical[strings.TrimSuffix(filepath.Base(hit.Path), ".md")]
+		if fid == "" || seen[fid] {
+			continue
+		}
+		seen[fid] = true
+		var body string
+		if err = db.QueryRow(`SELECT document FROM docs WHERE id=?`, fid).Scan(&body); err != nil {
+			return nil, nil, err
+		}
+		var doc Document
+		if err = json.Unmarshal([]byte(body), &doc); err != nil {
+			return nil, nil, err
+		}
+		parsed := engine.Parse(doc.SourcePath, doc.Markdown)
+		snippet := []rune(parsed.Body)
+		if len(snippet) > 600 {
+			snippet = snippet[:600]
+		}
+		hits = append(hits, engine.Hit{Path: fid + ".md", Title: parsed.Title, Snippet: string(snippet), Kind: doc.Kind, Grade: doc.Grade})
+	}
 	out := []Result{}
 	for _, h := range hits {
 		fid := strings.TrimSuffix(filepath.Base(h.Path), ".md")
@@ -328,11 +357,11 @@ func CachedQuery(root string, c Connection, q string, opts engine.Options) ([]Re
 				alerts = append(alerts, "Conflicting evidence (cached): "+r.Rationale)
 			}
 		}
-		out = append(out, Result{Warnings: alerts, Status: assessment.Status, TextDigest: TextDigest(cd.Markdown), Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid, CanonicalID: canonical[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
+		out = append(out, Result{Build: cd.Build, Warnings: alerts, Status: assessment.Status, TextDigest: TextDigest(cd.Markdown), Source: c.Alias, Service: c.Service, CommunityID: c.CommunityID, FindingID: fid, Revision: rid, CanonicalID: canonical[fid], Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, URL: c.Service + "/communities/" + c.CommunityID + "/findings/" + fid})
 	}
 	return out, map[string]any{"source": c.Alias, "sequence": cursor, "synced_at": synced, "cached": true, "warnings": warnings}, nil
 }
-func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.Options) (QueryResult, error) {
+func queryCandidates(ctx context.Context, root, q, mode string, offline bool, opts engine.Options) (QueryResult, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 8
@@ -358,7 +387,7 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 		}
 		out.Warnings = append(out.Warnings, warnings...)
 		for _, h := range hits {
-			out.Hits = append(out.Hits, Result{Source: "local", Path: h.Path, Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade})
+			out.Hits = append(out.Hits, Result{Source: "local", Path: h.Path, Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, Status: h.Status, Build: h.Build, TextDigest: h.TextDigest})
 		}
 	}
 	if mode != "local" {
@@ -411,28 +440,32 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 				out.Hits = matched
 			}
 			out.Hits = append(out.Hits, hits...)
+			if warnings, ok := source["warnings"].([]string); ok {
+				out.Warnings = append(out.Warnings, warnings...)
+			}
 			out.Sources = append(out.Sources, source)
 		}
 	}
-	out.Hits, err = collapseCopies(root, interleaveSources(out.Hits), limit)
+	out.Hits, err = collapseCopies(root, interleaveSources(out.Hits), 128)
 	return out, err
 }
 
 type Draft struct {
-	TransferKey  string     `json:"transfer_key,omitempty"`
-	FindingID    string     `json:"finding_id,omitempty"`
-	Revision     string     `json:"revision,omitempty"`
-	LastStatus   int        `json:"last_status,omitempty"`
-	ReplacedBy   string     `json:"replaced_by,omitempty"`
-	LocalID      string     `json:"local_id,omitempty"`
-	SourceDigest string     `json:"source_digest,omitempty"`
-	ID           string     `json:"id"`
-	Connection   Connection `json:"connection"`
-	Document     Document   `json:"document"`
-	State        string     `json:"state"`
-	Digest       string     `json:"digest,omitempty"`
-	SubmissionID string     `json:"submission_id,omitempty"`
-	Error        string     `json:"error,omitempty"`
+	Projection   *ClaimProjection `json:"projection,omitempty"` // local preview; never part of submitted Document
+	TransferKey  string           `json:"transfer_key,omitempty"`
+	FindingID    string           `json:"finding_id,omitempty"`
+	Revision     string           `json:"revision,omitempty"`
+	LastStatus   int              `json:"last_status,omitempty"`
+	ReplacedBy   string           `json:"replaced_by,omitempty"`
+	LocalID      string           `json:"local_id,omitempty"`
+	SourceDigest string           `json:"source_digest,omitempty"`
+	ID           string           `json:"id"`
+	Connection   Connection       `json:"connection"`
+	Document     Document         `json:"document"`
+	State        string           `json:"state"`
+	Digest       string           `json:"digest,omitempty"`
+	SubmissionID string           `json:"submission_id,omitempty"`
+	Error        string           `json:"error,omitempty"`
 }
 
 func draftPath(root, id string) string {
@@ -472,17 +505,8 @@ func Prepare(root string, c Connection, rel, build string) (Draft, []Check, erro
 	if build == "" {
 		build = parsed.Build
 	}
-	d := Document{SourceNamespace: c.SourceNamespace, SourcePath: clean, Markdown: string(b), Kind: parsed.Kind, Grade: parsed.Grade, Build: build, Evidence: []Evidence{}}
-	for _, e := range parsed.Evidence {
-		if strings.HasPrefix(e, "https://") {
-			d.Evidence = append(d.Evidence, Evidence{Label: e, URL: e})
-		} else {
-			d.Evidence = append(d.Evidence, Evidence{Label: e, Unavailable: true})
-		}
-	}
-	if excerpt := includedEvidence(parsed.Body); excerpt != "" {
-		d.Evidence = append(d.Evidence, Evidence{Label: "Supporting evidence included in this finding", Excerpt: excerpt})
-	}
+	projection := ProjectPublication(string(b))
+	d := Document{SourceNamespace: c.SourceNamespace, SourcePath: clean, Markdown: projection.Markdown, Kind: parsed.Kind, Grade: parsed.Grade, Build: build, Evidence: []Evidence{}}
 	checks := Validate(d)
 	if parsed.Status != "promoted" {
 		checks = append(checks, Check{"promotion", "Only promoted findings can be published.", true})
@@ -504,7 +528,11 @@ func Prepare(root string, c Connection, rel, build string) (Draft, []Check, erro
 	if draft.State != "draft" {
 		return draft, Validate(draft.Document), nil
 	}
+	draft.Projection = &projection
 	checks = Validate(draft.Document)
+	if len(projection.RemovedSections) > 0 {
+		checks = append(checks, Check{"claims_projection", "Research stays local. Preview the claim and retain any conditions from removed sections: " + strings.Join(projection.RemovedSections, ", "), projection.NeedsReview})
+	}
 	if parsed.Status != "promoted" {
 		checks = append(checks, Check{"promotion", "Only promoted findings can be published.", true})
 	}
@@ -520,6 +548,9 @@ func Queue(root, id string) (Draft, error) {
 	}
 	if d.State != "draft" && d.State != "queued" {
 		return d, fmt.Errorf("only an active draft can be queued")
+	}
+	if d.Projection != nil && d.Projection.NeedsReview {
+		return d, fmt.Errorf("review the removed research and preserve its claim qualifications with publish.update before queuing")
 	}
 	if d.State == "queued" && d.Digest != Digest(d.Document) {
 		return d, fmt.Errorf("queued payload is immutable; resolve its transfer before revising")

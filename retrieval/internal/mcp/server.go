@@ -16,7 +16,7 @@ import (
 type QueryFunc func(query string, opts search.QueryOptions) (string, error)
 
 // SymbolFunc resolves one symbol name with formatted text.
-type SymbolFunc func(name string, limit int) (string, error)
+type SymbolFunc func(name string, limit int, root string) (string, error)
 
 type Extension struct {
 	Name        string
@@ -79,10 +79,11 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 		case "tools/list":
 			resp.Result = map[string]any{"tools": []map[string]any{{
 				"name":        "query",
-				"description": "Search the project's curated reverse-engineering knowledge base (.re-discipline/docs/). Returns ranked findings with evidence paths. Search here before investigating anything.",
+				"description": "Search local knowledge and configured community sources through one ranked query. Supply the active project root so plugin launch directories cannot select another workspace. Search here before investigating.",
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
+						"root":    map[string]any{"type": "string", "description": "absolute active project directory"},
 						"query":   map[string]any{"type": "string", "description": "natural-language question or identifier"},
 						"limit":   map[string]any{"type": "integer", "description": "max results (default 8)"},
 						"kind":    map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
@@ -99,6 +100,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 					"type": "object",
 					"properties": map[string]any{
 						"name":  map[string]any{"type": "string", "description": "symbol name, e.g. idLangDict_langEntry_t or TAG_LANGDICT"},
+						"root":  map[string]any{"type": "string", "description": "absolute active project directory"},
 						"limit": map[string]any{"type": "integer", "description": "max results (default 5)"},
 					},
 					"required": []string{"name"},
@@ -113,6 +115,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 				Name      string `json:"name"`
 				Arguments struct {
 					Query   string `json:"query"`
+					Root    string `json:"root"`
 					Name    string `json:"name"`
 					Limit   int    `json:"limit"`
 					Kind    string `json:"kind"`
@@ -133,13 +136,14 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 			case "query":
 				text, err = query(p.Arguments.Query, search.QueryOptions{
 					Limit:   p.Arguments.Limit,
+					Root:    p.Arguments.Root,
 					Kind:    p.Arguments.Kind,
 					Grade:   p.Arguments.Grade,
 					Sources: p.Arguments.Sources,
 					Offline: p.Arguments.Offline,
 				})
 			case "symbol":
-				text, err = symbol(p.Arguments.Name, p.Arguments.Limit)
+				text, err = symbol(p.Arguments.Name, p.Arguments.Limit, p.Arguments.Root)
 			default:
 				found := false
 				for _, ext := range extensions {

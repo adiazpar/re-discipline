@@ -2,7 +2,9 @@ package community
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/adiazpar/re-discipline/retrieval/engine"
 )
@@ -21,7 +23,13 @@ func RemoteQuery(ctx context.Context, conn Connection, query string, opts engine
 	if err != nil {
 		return out, err
 	}
-	err = client.Operation(ctx, "query", conn.CommunityID, map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade}, &out)
+	err = client.Operation(ctx, "query", conn.CommunityID, map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade, "assistance": false}, &out)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == 400 && strings.Contains(apiErr.Message, `unknown field "assistance"`) {
+		// Older services have no inference option. Retry this read-only query
+		// with their original schema; never retry authentication or server errors.
+		err = client.Operation(ctx, "query", conn.CommunityID, map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade}, &out)
+	}
 	if err != nil {
 		return out, err
 	}

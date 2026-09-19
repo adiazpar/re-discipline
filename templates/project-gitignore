@@ -5,3 +5,5 @@ index.db.build
 bin/
 community/
 community.json
+assistance.json
+cache/

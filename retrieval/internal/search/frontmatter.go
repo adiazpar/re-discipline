@@ -1,24 +1,27 @@
 package search
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path"
 	"strings"
 )
 
 // Doc is one parsed markdown document from .re-discipline/docs/.
 type Doc struct {
-	Build    string // optional explicit applicability for portable publication
-	Path     string // relative to .re-discipline/, forward slashes
-	Title    string
-	Body     string
-	Status   string // promoted | superseded | candidate | ""
-	Kind     string // fact | ops | ""
-	Grade    string // direct | inferred | reported | ""
-	Tags     []string
-	Idents   []string // identifiers this doc declares itself authoritative for
-	Aliases  []string // alternate phrasings a searcher might use; indexed as text, never grants the reference-penalty exemption
-	Evidence []string // evidence paths; stored for callers, never indexed as text
-	Warning  string   // non-empty when frontmatter was malformed
+	TextDigest string
+	Build      string // optional explicit applicability for portable publication
+	Path       string // relative to .re-discipline/, forward slashes
+	Title      string
+	Body       string
+	Status     string // promoted | superseded | candidate | ""
+	Kind       string // fact | ops | ""
+	Grade      string // direct | inferred | reported | ""
+	Tags       []string
+	Idents     []string // identifiers this doc declares itself authoritative for
+	Aliases    []string // alternate phrasings a searcher might use; indexed as text, never grants the reference-penalty exemption
+	Evidence   []string // evidence paths; stored for callers, never indexed as text
+	Warning    string   // non-empty when frontmatter was malformed
 }
 
 // ParseDoc parses raw markdown with optional frontmatter. It is lenient:
@@ -27,6 +30,8 @@ type Doc struct {
 func ParseDoc(relPath, raw string) Doc {
 	d := Doc{Path: relPath}
 	text := strings.ReplaceAll(raw, "\r\n", "\n")
+	hash := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	d.TextDigest = hex.EncodeToString(hash[:])
 	body := text
 	if strings.HasPrefix(text, "---\n") {
 		rest := text[len("---\n"):]

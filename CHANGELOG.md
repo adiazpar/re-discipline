@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0
+
+- Publish selected claims through one route and one dashboard action. Research stays local; applicability, attribution and revision history stay with the claim.
+- Add optional Jev ranking, publication selection and compact review assistance with bounded requests, private caches and ordinary-workflow fallback.
+- Combine local and community retrieval, preserve canonical contributions and corrections, and report the effective project root across tool surfaces.
+- Feed revision-bound background community checks into existing review, including pending contributions, duplicate groups and incomplete processing.
+
+
 ## 1.8.1 - 2026-09-07
 
 Combined retrieval groups server-linked source variants when portable publications

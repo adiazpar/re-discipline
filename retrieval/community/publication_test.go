@@ -161,8 +161,18 @@ func TestPortablePromotionAndDraftRevision(t *testing.T) {
 	os.WriteFile(filepath.Join(base, "finding.md"), []byte(body), 0600)
 	c := Connection{Service: "https://example.test", CommunityID: uuid.NewString(), Alias: "test"}
 	d, checks, err := Prepare(root, c, "docs/finding.md", "")
-	if err != nil || len(checks) != 0 || d.Document.Build != "Exact build and modifications" || d.Document.Evidence[0].Excerpt != "Selected engine observation." {
+	if err != nil || len(checks) != 1 || !checks[0].Blocking || d.Document.Build != "Exact build and modifications" || len(d.Document.Evidence) != 0 || strings.Contains(d.Document.Markdown, "Selected engine observation.") || !strings.Contains(d.Document.Markdown, "One investigated build.") {
 		t.Fatalf("portable promotion: %+v %+v %v", d, checks, err)
+	}
+	if _, err = Queue(root, d.ID); err == nil {
+		t.Fatal("research projection bypassed qualification review")
+	}
+	if _, err = Execute(context.Background(), root, Command{Action: "publish.update", DraftID: d.ID, Data: mustJSON(d.Document)}); err != nil {
+		t.Fatal(err)
+	}
+	d, err = Queue(root, d.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	d.State = "queued"
 	d.LastStatus = 422

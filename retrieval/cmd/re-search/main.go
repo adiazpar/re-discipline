@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/adiazpar/re-discipline/retrieval/community"
 	"github.com/adiazpar/re-discipline/retrieval/internal/httpserve"
@@ -38,6 +39,8 @@ func run(args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	rootFlag := fs.String("root", "", "project root (default: walk up from cwd to .re-discipline)")
 	jsonOut := fs.Bool("json", false, "JSON output")
+	diagnostics := fs.Bool("diagnostics", false, "include source, assistance and usage metadata in query JSON")
+	baseline := fs.Bool("baseline", false, "diagnostic: preserve retrieval order without optional inference")
 	limit := fs.Int("limit", 8, "max results")
 	kind := fs.String("kind", "", "only docs of this kind (fact|ops|reference); empty = all")
 	grade := fs.String("grade", "", "only docs of this grade (direct|inferred|reported); empty = all")
@@ -50,7 +53,11 @@ func run(args []string) error {
 
 	resolveRoot := func() (string, error) {
 		if *rootFlag != "" {
-			return *rootFlag, nil
+			absolute, err := filepath.Abs(*rootFlag)
+			if err != nil {
+				return "", err
+			}
+			return community.ProjectRoot(absolute)
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -60,6 +67,16 @@ func run(args []string) error {
 	}
 
 	switch cmd {
+	case "status":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		out, err := community.AssistanceInfo(root)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(out)
 	case "community":
 		root, err := resolveRoot()
 		if err != nil {
@@ -105,20 +122,24 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		if *sources != "local" && (*sources != "" || settings.Mode != "local") {
-			result, err := community.Query(context.Background(), root, q, *sources, *offline, search.QueryOptions{Limit: *limit, Kind: *kind, Grade: *grade})
-			if err != nil {
-				return err
-			}
-			return json.NewEncoder(os.Stdout).Encode(result)
+		assistance := "configured"
+		if *baseline {
+			assistance = "off"
 		}
-		hits, warnings, err := search.QueryOpts(root, q, search.QueryOptions{Limit: *limit, Kind: *kind, Grade: *grade})
-		printWarnings(warnings)
+		result, err := community.Query(context.Background(), root, q, *sources, *offline, search.QueryOptions{Limit: *limit, Kind: *kind, Grade: *grade, Assistance: assistance})
+		printWarnings(result.Warnings)
 		if err != nil {
 			return err
 		}
+		if *diagnostics || (*sources != "local" && (*sources != "" || settings.Mode != "local")) {
+			return json.NewEncoder(os.Stdout).Encode(result)
+		}
 		if *jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(hits)
+			return json.NewEncoder(os.Stdout).Encode(result.Hits)
+		}
+		hits := []search.Hit{}
+		for _, h := range result.Hits {
+			hits = append(hits, search.Hit{Path: h.Path, Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, Status: h.Status, Build: h.Build, TextDigest: h.TextDigest})
 		}
 		fmt.Print(search.FormatHits(hits))
 		return nil
@@ -195,29 +216,30 @@ func run(args []string) error {
 		// text answer instead.
 		queryText := func(q string, opts search.QueryOptions) (string, error) {
 			root, err := resolveRoot()
+			if opts.Root != "" {
+				root, err = community.ProjectRoot(opts.Root)
+				if err != nil {
+					return "", err
+				}
+			}
 			if err != nil {
 				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
 			}
-			settings, e := community.LoadSettings(root)
+			result, e := community.Query(context.Background(), root, q, opts.Sources, opts.Offline, opts)
 			if e != nil {
 				return "", e
 			}
-			if opts.Sources != "local" && (opts.Sources != "" || settings.Mode != "local") {
-				result, e := community.Query(context.Background(), root, q, opts.Sources, opts.Offline, opts)
-				if e != nil {
-					return "", e
-				}
-				b, e := json.Marshal(result)
-				return string(b), e
-			}
-			hits, _, qErr := search.QueryOpts(root, q, opts)
-			if qErr != nil {
-				return "", qErr
-			}
-			return search.FormatHits(hits), nil
+			b, e := json.Marshal(result)
+			return string(b), e
 		}
-		symbolText := func(name string, limit int) (string, error) {
+		symbolText := func(name string, limit int, explicitRoot string) (string, error) {
 			root, err := resolveRoot()
+			if explicitRoot != "" {
+				root, err = community.ProjectRoot(explicitRoot)
+				if err != nil {
+					return "", err
+				}
+			}
 			if err != nil {
 				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
 			}
@@ -243,13 +265,12 @@ func run(args []string) error {
 				},
 			})
 		case *httpAddr != "":
-			return httpserve.ListenAndServe(*httpAddr, func(q string, opts search.QueryOptions) ([]search.Hit, error) {
+			return httpserve.ListenAndServeResult(*httpAddr, func(q string, opts search.QueryOptions) (any, error) {
 				root, err := resolveRoot()
 				if err != nil {
 					return nil, err
 				}
-				hits, _, qErr := search.QueryOpts(root, q, opts)
-				return hits, qErr
+				return community.Query(context.Background(), root, q, opts.Sources, opts.Offline, opts)
 			}, func(name string, limit int) (search.SymbolHits, error) {
 				root, err := resolveRoot()
 				if err != nil {

@@ -24,7 +24,8 @@ type Request struct {
 type Policy struct {
 	Scope      string   `json:"scope"`
 	Exclusions []string `json:"exclusions"`
-	Mode       string   `json:"mode"` // maintainer, trusted, automated
+	Mode       string   `json:"mode"`                 // maintainer, trusted, automated
+	Assistance bool     `json:"assistance,omitempty"` // explicit community opt-in; never changes review policy
 }
 
 type Library struct {
@@ -109,7 +110,7 @@ func Digest(d Document) string {
 }
 
 var localPath = regexp.MustCompile(`(?i)(\b[a-z]:[\\/]|\\\\[a-z0-9]|/Users/|/home/|\blocalhost\b|127\.0\.0\.1|\[::1\])`)
-var secret = regexp.MustCompile(`(?i)(-----BEGIN .*PRIVATE KEY-----|\b(?:sk-proj-|ghp_|github_pat_)[a-z0-9_-]{12,}|\b(?:api[_-]?key|password|access[_-]?token)\s*[:=]\s*["']?[a-z0-9_+/=-]{16,})`)
+var secret = regexp.MustCompile(`(?i)(-----BEGIN .*PRIVATE KEY-----|\b(?:apikey_|sk-proj-|ghp_|github_pat_)[a-z0-9_-]{12,}|\b(?:api[_-]?key|password|access[_-]?token)\s*[:=]\s*["']?[a-z0-9_+/=-]{16,})`)
 
 // Validate is a deterministic portability gate. Semantic scope review is separate.
 func Validate(d Document) []Check {
@@ -161,8 +162,8 @@ func Validate(d Document) []Check {
 	if secret.MatchString(material) {
 		add("secret", "Remove credential-like material from the publication draft.")
 	}
-	if len(d.Evidence) == 0 || len(d.Evidence) > 30 {
-		add("evidence", "Provide 1 to 30 explicit evidence references or excerpts.")
+	if len(d.Evidence) > 30 {
+		add("evidence", "At most 30 optional evidence references or excerpts are supported.")
 	}
 	for _, e := range d.Evidence {
 		if strings.TrimSpace(e.Label) == "" || (e.Excerpt == "" && e.URL == "" && !e.Unavailable) {

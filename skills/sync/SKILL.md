@@ -5,7 +5,10 @@ description: Synchronize explicitly connected community KBs into a separate offl
 
 # Synchronize community knowledge
 
-Call the `community` tool with `connections` first. Source mode (`local`,
+Call `status` and `connections` with the absolute active project `root` first.
+Use that same root for query and symbol calls. Optional Jev ranking lives inside
+the normal query route, covers the configured local/community candidates, and
+fails back to ordinary ordering if unavailable. Source mode (`local`,
 `external`, `both`) and community transport (`remote`, `sync`) are independent.
 For server-only retrieval, call `retrieval.set` with `retrieval: "remote"` and
 use the normal query tool; do not call sync. This preference persists per project.

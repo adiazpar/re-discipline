@@ -16,7 +16,7 @@ func rpc(t *testing.T, lines ...string) []map[string]any {
 	var out bytes.Buffer
 	err := Serve(in, &out, "1.0.0-test", func(q string, opts search.QueryOptions) (string, error) {
 		return fmt.Sprintf("RESULT for %s kind=%q grade=%q limit=%d", q, opts.Kind, opts.Grade, opts.Limit), nil
-	}, func(name string, limit int) (string, error) {
+	}, func(name string, limit int, root string) (string, error) {
 		return fmt.Sprintf("SYMBOL %s limit=%d", name, limit), nil
 	})
 	if err != nil {

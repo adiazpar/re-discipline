@@ -7,12 +7,33 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/adiazpar/re-discipline/retrieval/engine"
 	"github.com/google/uuid"
 )
+
+func TestRemoteQuerySupportsOlderStrictServices(t *testing.T) {
+	calls := 0
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Request
+		json.NewDecoder(r.Body).Decode(&req)
+		calls++
+		if strings.Contains(string(req.Data), `"assistance"`) {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": `json: unknown field "assistance"`})
+			return
+		}
+		json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: "one", Title: "Clock"}}})
+	}))
+	defer h.Close()
+	result, err := RemoteQuery(context.Background(), Connection{Service: h.URL, Alias: "older"}, "clock", engine.Options{Limit: 8})
+	if err != nil || calls != 2 || len(result.Hits) != 1 {
+		t.Fatalf("old service query failed: %+v %v (%d calls)", result, err, calls)
+	}
+}
 
 func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 	root := t.TempDir()
@@ -46,7 +67,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 				Kind, Grade string
 			}
 			json.Unmarshal(req.Data, &args)
-			if req.Community != cid || args.Query != "timescale" || args.Limit != 2 || args.Kind != "fact" || args.Grade != "direct" {
+			if req.Community != cid || args.Query != "timescale" || args.Limit < 2 || args.Limit > 128 || args.Kind != "fact" || args.Grade != "direct" {
 				t.Errorf("query payload: %+v %+v", req, args)
 			}
 			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: fid, Revision: rid, Title: "Remote timescale", Snippet: "Remote evidence", Kind: "fact", Grade: "direct", Contributions: []Result{{FindingID: uuid.NewString(), Revision: uuid.NewString(), Title: "Independent observation"}}}}})
