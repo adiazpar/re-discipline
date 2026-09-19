@@ -74,7 +74,23 @@ func Query(root, q string, limit int) ([]Hit, []string, error) {
 
 // QueryOpts is Query with optional kind/grade filtering.
 func QueryOpts(root, q string, opts QueryOptions) ([]Hit, []string, error) {
-	ranked, _, warnings, err := rank(root, q, opts)
+	return queryIndex(root, q, opts, true)
+}
+
+// QuerySnapshot reads an explicitly built immutable index. Its owner must select
+// a new snapshot when content changes. Mutable project queries use QueryOpts.
+func QuerySnapshot(root, q string, opts QueryOptions) ([]Hit, []string, error) {
+	if _, err := os.Stat(IndexPath(root)); err != nil {
+		return nil, nil, err
+	}
+	if !schemaCurrent(IndexPath(root)) {
+		return nil, nil, fmt.Errorf("snapshot index is corrupt or has an unsupported format")
+	}
+	return queryIndex(root, q, opts, false)
+}
+
+func queryIndex(root, q string, opts QueryOptions, refresh bool) ([]Hit, []string, error) {
+	ranked, _, warnings, err := rankIndex(root, q, opts, refresh)
 	if err != nil {
 		return nil, warnings, err
 	}
@@ -112,7 +128,14 @@ type ScoredHit struct {
 // became. QueryOpts pages it; Explain reports it. Both go through here
 // so the explanation can never drift from the answer.
 func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, error) {
-	warnings := EnsureFresh(root)
+	return rankIndex(root, q, opts, true)
+}
+
+func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, string, []string, error) {
+	var warnings []string
+	if refresh {
+		warnings = EnsureFresh(root)
+	}
 	match := BuildMatch(q)
 	if match == "" {
 		return nil, "", warnings, nil

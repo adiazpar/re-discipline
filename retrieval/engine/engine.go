@@ -9,6 +9,7 @@ type Doc = search.Doc
 type SymbolHits = search.SymbolHits
 
 var Query = search.QueryOpts
+var QuerySnapshot = search.QuerySnapshot
 var Parse = search.ParseDoc
 var Build = search.BuildIndexFile
 var Symbols = search.LookupSymbol

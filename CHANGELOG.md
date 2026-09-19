@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.1
+
+- Let the community service query immutable search snapshots without rescanning every document for each request.
+- Keep automatic freshness checks for local projects and explicit recovery for missing or damaged snapshots.
+
 ## 1.9.0
 
 - Publish selected claims through one route and one dashboard action. Research stays local; applicability, attribution and revision history stay with the claim.
