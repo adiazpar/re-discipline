@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path"
@@ -10,8 +11,8 @@ import (
 )
 
 // WriteIndexMD regenerates docs/INDEX.md deterministically from parsed
-// docs. INDEX.md is a derived artifact: clobbers cost nothing because
-// this function is the recovery.
+// docs. Publish a complete replacement so mapped readers retain their old
+// snapshot, and a failed publication leaves the previous index intact.
 func WriteIndexMD(root string, docs []Doc) error {
 	byDir := map[string][]Doc{}
 	for _, d := range docs {
@@ -46,7 +47,32 @@ func WriteIndexMD(root string, docs []Doc) error {
 			b.WriteString(line + "\n")
 		}
 	}
-	return os.WriteFile(filepath.Join(root, ".re-discipline", "docs", "INDEX.md"), []byte(b.String()), 0o644)
+	dst := filepath.Join(root, ".re-discipline", "docs", "INDEX.md")
+	data := []byte(b.String())
+	if current, err := os.ReadFile(dst); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".index-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return SwapIndex(tmp.Name(), dst)
 }
 
 func compact(vals ...string) []string {

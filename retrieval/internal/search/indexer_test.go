@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func buildTestCorpus(t *testing.T) string {
@@ -228,6 +229,34 @@ func TestWriteIndexMD(t *testing.T) {
 	s := string(raw)
 	if !strings.Contains(s, "engine/joint-binding.md") || !strings.Contains(s, "superseded") {
 		t.Fatalf("INDEX.md content:\n%s", s)
+	}
+}
+
+func TestWriteIndexMDUnchangedKeepsFile(t *testing.T) {
+	root := buildTestCorpus(t)
+	metas, _ := ScanDocs(root)
+	docs, _ := LoadDocs(root, metas)
+	if err := WriteIndexMD(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, ".re-discipline", "docs", "INDEX.md")
+	stamp := time.Unix(1700000000, 0)
+	if err := os.Chtimes(p, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndexMD(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("unchanged content replaced or rewrote the index")
 	}
 }
 

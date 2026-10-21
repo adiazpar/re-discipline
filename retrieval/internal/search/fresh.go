@@ -10,14 +10,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// SwapIndex renames tmpPath over dstPath. Windows refuses to replace a
-// file another process has open, so retry with backoff; on persistent
-// failure remove the temp file and report — callers treat this as
+// SwapIndex publishes tmpPath over dstPath while preserving open readers
+// where the platform supports it. Retry transient sharing conflicts; on
+// persistent failure remove the temp file and report — callers treat this as
 // non-fatal (the existing index keeps serving).
 func SwapIndex(tmpPath, dstPath string) error {
 	var err error
 	for i := 0; i < 10; i++ {
-		if err = os.Rename(tmpPath, dstPath); err == nil {
+		if err = replaceFile(tmpPath, dstPath); err == nil {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -63,10 +63,10 @@ func EnsureFresh(root string) []string {
 
 	stale := false
 	if stored, err := ReadManifest(dbPath); err != nil {
-		// Missing or corrupt index: it is disposable — delete and rebuild.
-		if rmErr := os.Remove(dbPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			warnings = append(warnings, fmt.Sprintf("index unreadable and could not be removed (%v); retrying next query", rmErr))
-		}
+		// An unreadable manifest requests a rebuild, not deletion. Only the
+		// lock holder may publish, and it replaces the old index atomically
+		// after the new one is complete. A read error is not proof that the
+		// existing index cannot serve other readers.
 		stale = true
 	} else if ManifestDiffers(stored, current) || !schemaCurrent(dbPath) {
 		stale = true

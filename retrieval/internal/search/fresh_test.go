@@ -1,8 +1,10 @@
 package search
 
 import (
+	"bytes"
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +36,7 @@ func TestEnsureFreshBuildsAndHealsCorruption(t *testing.T) {
 		t.Fatalf("index must exist after EnsureFresh: %v (warnings %v)", err, warnings)
 	}
 
-	// Corrupt the index; EnsureFresh must silently delete and rebuild.
+	// Corrupt the index; EnsureFresh must replace it with a complete rebuild.
 	if err := os.WriteFile(IndexPath(root), []byte("not a database"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -110,5 +112,46 @@ func TestEnsureFreshLockBusyServesExisting(t *testing.T) {
 	_ = warnings
 	if _, err := ReadManifest(IndexPath(root)); err != nil {
 		t.Fatalf("existing index must remain usable: %v", err)
+	}
+}
+
+func TestEnsureFreshUnreadableManifestDoesNotDeleteWithoutLock(t *testing.T) {
+	for _, cause := range []string{"corrupt", "missing manifest"} {
+		t.Run(cause, func(t *testing.T) {
+			root := buildTestCorpus(t)
+			EnsureFresh(root)
+			if cause == "corrupt" {
+				if err := os.WriteFile(IndexPath(root), []byte("not a database"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				db, err := sql.Open("sqlite", IndexPath(root))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = db.Exec(`DROP TABLE manifest`)
+				db.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(IndexPath(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			release, ok := TryLock(root)
+			if !ok {
+				t.Fatal("setup lock failed")
+			}
+			defer release()
+			warnings := EnsureFresh(root)
+			if !strings.Contains(strings.Join(warnings, "\n"), "another process is rebuilding") {
+				t.Fatalf("expected busy warning, got %v", warnings)
+			}
+			after, err := os.ReadFile(IndexPath(root))
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("reader without rebuild lock changed published index: %v", err)
+			}
+		})
 	}
 }
