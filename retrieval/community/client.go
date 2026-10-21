@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,6 +31,28 @@ type Client struct {
 	HTTP  *http.Client
 }
 
+// Bound connection establishment independently of a connected service's cold
+// start. Keep one transport so successive operations reuse healthy connections.
+var communityHTTPTransport = connectBoundTransport(http.DefaultTransport, 5*time.Second)
+
+func connectBoundTransport(base http.RoundTripper, timeout time.Duration) http.RoundTripper {
+	transport, ok := base.(*http.Transport)
+	if !ok {
+		return base // Preserve an explicitly supplied custom transport.
+	}
+	clone := transport.Clone()
+	dial := clone.DialContext
+	if dial == nil {
+		dial = (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext
+	}
+	clone.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		connection, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return dial(connection, network, address)
+	}
+	return clone
+}
+
 func NewClient(endpoint string) (*Client, error) {
 	u, err := url.Parse(strings.TrimRight(endpoint, "/"))
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -44,7 +67,7 @@ func NewClient(endpoint string) (*Client, error) {
 		token = e
 	}
 	// Free hosting can take over 50 seconds to wake an idle service.
-	return &Client{URL: base, Token: token, HTTP: &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{URL: base, Token: token, HTTP: &http.Client{Transport: communityHTTPTransport, Timeout: 90 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (c *Client) call(ctx context.Context, path string, payload, out any) error {
 	b, err := json.Marshal(payload)
