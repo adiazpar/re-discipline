@@ -33,8 +33,11 @@ func ParseDoc(relPath, raw string) Doc {
 	hash := sha256.Sum256([]byte(strings.TrimSpace(text)))
 	d.TextDigest = hex.EncodeToString(hash[:])
 	body := text
-	if strings.HasPrefix(text, "---\n") {
-		rest := text[len("---\n"):]
+	// Some Windows writers double the carriage return. Keep the source digest
+	// unchanged, but still recognize the opening fence and its status metadata.
+	openingEnd := strings.IndexByte(text, '\n')
+	if openingEnd >= 0 && strings.TrimRight(text[:openingEnd], "\r") == "---" {
+		rest := text[openingEnd+1:]
 		if end := strings.Index(rest, "\n---"); end >= 0 {
 			fm := rest[:end]
 			after := rest[end+len("\n---"):]

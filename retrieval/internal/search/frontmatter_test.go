@@ -1,6 +1,9 @@
 package search
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const goodDoc = `---
 status: promoted
@@ -34,6 +37,24 @@ func TestParseDocFrontmatter(t *testing.T) {
 	}
 	if d.Warning != "" {
 		t.Fatalf("unexpected warning: %q", d.Warning)
+	}
+}
+
+func TestParseDocSupersededMetadataWithWindowsLineEndings(t *testing.T) {
+	const raw = "---\nstatus: superseded\nkind: fact\ngrade: direct\nbuild: pinned image\nevidence: [reports/correction.md]\n---\n# Withdrawn route\nSee the replacement.\n"
+	for _, ending := range []string{"\n", "\r\n", "\r\r\n"} {
+		t.Run(strings.ReplaceAll(strings.ReplaceAll(ending, "\r", "CR"), "\n", "LF"), func(t *testing.T) {
+			d := ParseDoc("docs/withdrawn.md", strings.ReplaceAll(raw, "\n", ending))
+			if d.Status != "superseded" || d.Kind != "fact" || d.Grade != "direct" || d.Build != "pinned image" {
+				t.Fatalf("withdrawn finding lost its applicability metadata: %+v", d)
+			}
+			if len(d.Evidence) != 1 || d.Evidence[0] != "reports/correction.md" || d.Title != "Withdrawn route" {
+				t.Fatalf("withdrawn finding lost its evidence or title: %+v", d)
+			}
+			if strings.Contains(d.Body, "status:") || d.Warning != "" {
+				t.Fatalf("frontmatter was indexed as prose: %+v", d)
+			}
+		})
 	}
 }
 
