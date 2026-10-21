@@ -168,6 +168,21 @@ func (c *Client) cache() (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	// Existing caches are readable while another process reserves a writer.
+	// Even INSERT OR IGNORE would require that writer to finish, so only run
+	// initialization when the tables or singleton epoch actually need creating.
+	var tables, epochs int
+	err = db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('judgments','budgets','cache_epoch')`).Scan(&tables)
+	if err == nil && tables == 3 {
+		err = db.QueryRow(`SELECT count(*) FROM cache_epoch WHERE id=1`).Scan(&epochs)
+		if err == nil && epochs == 1 {
+			return db, nil
+		}
+	}
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS judgments(key TEXT PRIMARY KEY,value TEXT NOT NULL,used_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS budgets(day TEXT PRIMARY KEY,calls INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS cache_epoch(id INTEGER PRIMARY KEY,generation INTEGER NOT NULL); INSERT OR IGNORE INTO cache_epoch(id,generation) VALUES(1,0);`)
 	if err != nil {
 		db.Close()
@@ -205,7 +220,7 @@ func (c *Client) Evaluate(ctx context.Context, namespace string, state any, ques
 	}
 	db, err := c.cache()
 	if err != nil {
-		return result, errors.New("assistance cache unavailable; using ordinary workflow")
+		return result, fmt.Errorf("assistance cache unavailable; using ordinary workflow: %w", err)
 	}
 	defer db.Close()
 	var epoch int64
@@ -216,7 +231,12 @@ func (c *Client) Evaluate(ctx context.Context, namespace string, state any, ques
 	var saved string
 	if db.QueryRowContext(ctx, `SELECT value FROM judgments WHERE key=?`, key).Scan(&saved) == nil && json.Unmarshal([]byte(saved), &result) == nil && Validate(result, questions) == nil {
 		result.Cached = true
-		db.ExecContext(ctx, `UPDATE judgments SET used_at=? WHERE key=?`, time.Now().UTC().Format(time.RFC3339Nano), key)
+		// Recency bookkeeping is optional. This connection is closed on return;
+		// do not wait for a writer just to touch a usable cached answer. Cache
+		// misses keep the normal timeout and atomic budget reservation below.
+		if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=0`); err == nil {
+			db.ExecContext(ctx, `UPDATE judgments SET used_at=? WHERE key=?`, time.Now().UTC().Format(time.RFC3339Nano), key)
+		}
 		return result, nil
 	}
 	result = Judgment{}
