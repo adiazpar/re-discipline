@@ -62,6 +62,11 @@ adds shared libraries to local retrieval. Its backend lives in the separate
 [community repository](https://github.com/adiazpar/re-discipline-community).
 The plugin remains usable without an account or network connection.
 
+Community connections allow up to five seconds to establish TCP, while connected
+requests retain a 90-second allowance for services waking from an idle state.
+Unreachable sources remain visible as warnings; local results are still returned.
+This does not change configured sources, permissions or offline-cache preferences.
+
 For live community search without downloading the KB, tell your agent:
 "Connect to this community with server-only retrieval and search both local and
 community knowledge." The agent passes `retrieval: "remote"` on `connect`, or
@@ -145,11 +150,10 @@ queries than it helped, and the largest single render is 642 lines.
 re-search explain --json "what stops a demon attacking"
 ```
 
-Every candidate comes back with its bm25 score, the penalty charged to it, and
-its rank before and after that penalty. A row that moved is a row the re-rank
-decided, and a reference entry that stayed put is one that declares a name you
-typed. `re-search stats` prints the matching census of the corpus and the
-ranking constants in force.
+Every candidate comes back with its bm25 score, reference penalty, exact-name
+priority and resulting rank. An exact whole-name lookup favors the document
+that declares that identifier; broader questions retain relevance ranking.
+`re-search stats` prints the matching census and ranking rules in force.
 
 Both run the same code paths as a real search -- `explain` calls the ranker
 `query` calls, not a reimplementation of it, and a test keeps the two orders
@@ -200,6 +204,10 @@ the curated facts on ordinary questions.
 `re-search` handles this without a filter the caller has to remember:
 
 - **Ranking** weights `title` and the identifier column above `body`.
+- **Exact whole-name lookups prefer declared identifiers** before score ranking
+  and before the candidate limit. Short incidental mentions or aliases cannot
+  crowd out the declaring document. Superseded documents still sort last, and
+  kind/grade filters still apply. Broader questions keep relevance ranking.
 - **Reference docs take a rank penalty on concept questions**, and are
   exempt from it when the query names one of their declared `idents`.
   So "why did the boss stand still" reaches a curated fact, while
