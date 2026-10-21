@@ -121,6 +121,9 @@ type ScoredHit struct {
 	// its own idents frontmatter, which is what waives the penalty.
 	Declares   bool `json:"declares_query_term"`
 	Superseded bool `json:"superseded"`
+	// ExactIdentifier is a whole-query lookup of a declared identifier, not
+	// a body mention or an alias. It outranks BM25 within the same status.
+	ExactIdentifier bool `json:"exact_identifier"`
 }
 
 // rank runs the whole ranking pipeline and returns every candidate it
@@ -157,16 +160,21 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 	// More candidates than the page are fetched so the Go-side
 	// reference-penalty re-rank below has the fact rows that belong on
 	// the page after reference rows are demoted past them.
+	exact := strings.ToLower(strings.Trim(strings.TrimSpace(q), "\"`"))
+	if exact == "" || wordRe.FindString(exact) != exact {
+		exact = ""
+	}
 	q1 := fmt.Sprintf(`
 		SELECT docs.path, docs.title, docs.status, docs.kind, docs.grade,
 		       snippet(docs, 1, '«', '»', '…', 40),
 		       COALESCE(docmeta.evidence, ''),
 		       COALESCE(docmeta.idents, ''),
 		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
-		       bm25(docs, %v, %v, %v) AS score
+		       bm25(docs, %v, %v, %v) AS score,
+		       (? <> '' AND instr(' ' || COALESCE(docmeta.idents, '') || ' ', ' ' || ? || ' ') > 0) AS exact_identifier
 		FROM docs LEFT JOIN docmeta ON docmeta.path = docs.path
 		WHERE docs MATCH ?`, weightTitle, weightBody, weightIdents)
-	args := []any{match}
+	args := []any{exact, exact, match}
 	if opts.Kind != "" {
 		q1 += ` AND docs.kind = ?`
 		args = append(args, opts.Kind)
@@ -175,7 +183,9 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 		q1 += ` AND docs.grade = ?`
 		args = append(args, opts.Grade)
 	}
-	q1 += ` ORDER BY (docs.status = 'superseded') ASC, score LIMIT ?`
+	// Select declared exact answers before the candidate limit too: a long
+	// authoritative document must not be crowded out by short mentions.
+	q1 += ` ORDER BY (docs.status = 'superseded') ASC, exact_identifier DESC, score LIMIT ?`
 	fetch := opts.Limit * 20
 	if fetch < rerankFetchMin {
 		fetch = rerankFetchMin
@@ -195,14 +205,16 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 		var h Hit
 		var evidence, declared string
 		var score float64
-		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &score); err != nil {
+		var exactIdentifier bool
+		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &score, &exactIdentifier); err != nil {
 			return nil, match, warnings, err
 		}
 		if evidence != "" {
 			h.Evidence = strings.Split(evidence, "\n")
 		}
 		s := ScoredHit{Hit: h, Raw: score, Final: score,
-			Declares: declaredIdentMatch(declared, queryTerms), Superseded: h.Status == "superseded"}
+			Declares: declaredIdentMatch(declared, queryTerms), Superseded: h.Status == "superseded",
+			ExactIdentifier: exactIdentifier}
 		if h.Kind == "reference" && !s.Declares {
 			s.Penalty = referencePenalty
 			s.Final = score + referencePenalty
@@ -217,6 +229,9 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Superseded != all[j].Superseded {
 			return !all[i].Superseded
+		}
+		if all[i].ExactIdentifier != all[j].ExactIdentifier {
+			return all[i].ExactIdentifier
 		}
 		return all[i].Final < all[j].Final
 	})

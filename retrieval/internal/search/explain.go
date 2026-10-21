@@ -224,6 +224,7 @@ func FormatStats(s StatsResult) string {
 	fmt.Fprintf(&b, "  weights      title x%v, idents x%v, body x%v\n",
 		r.TitleWeight, r.IdentsWeight, r.BodyWeight)
 	fmt.Fprintf(&b, "  penalty      +%v to reference docs declaring no query term\n", r.ReferencePenalty)
+	b.WriteString("  exact names  declared identifiers first within current/superseded groups\n")
 	fmt.Fprintf(&b, "  page size    %d (from %d candidates)\n", r.DefaultLimit, r.CandidateFetch)
 	fmt.Fprintf(&b, "  tokenizer    %s, %d stop words\n", r.Tokenizer, r.StopWords)
 	return b.String()
@@ -242,7 +243,7 @@ func FormatExplain(e ExplainResult) string {
 		b.WriteString("\nno candidates matched\n")
 		return b.String()
 	}
-	fmt.Fprintf(&b, "\n%d candidates considered, %d returned. Scores are negative; lower is better.\n\n",
+	fmt.Fprintf(&b, "\n%d candidates considered, %d returned. Current documents precede superseded ones; exact declared names precede score ranking within each group. Scores are negative; lower is better.\n\n",
 		len(e.Rows), e.Returned)
 	fmt.Fprintf(&b, "  %-4s %-4s %9s %7s %9s  %s\n", "was", "now", "bm25", "penalty", "final", "path")
 	for _, r := range e.Rows {
@@ -250,7 +251,9 @@ func FormatExplain(e ExplainResult) string {
 			break
 		}
 		note := ""
-		if r.Penalty > 0 {
+		if r.ExactIdentifier {
+			note = "  (declares the exact lookup; ranked before score)"
+		} else if r.Penalty > 0 {
 			note = "  (reference, declares none of your terms)"
 		} else if r.Declares {
 			note = "  (declares your term; penalty waived)"

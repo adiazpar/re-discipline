@@ -2,9 +2,57 @@ package search
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestExactIdentifierRanksAuthorityBeforeMentionPool(t *testing.T) {
+	root := t.TempDir()
+	// More short incidental matches than the normal candidate fetch can hold.
+	for i := 0; i < rerankFetchMin+20; i++ {
+		writeDoc(t, root, fmt.Sprintf("docs/mentions/m%03d.md", i),
+			"---\nstatus: promoted\nkind: fact\n---\n# sh_execution_context side effect\n\nsh_execution_context\n")
+	}
+	writeDoc(t, root, "docs/authority.md", "---\nstatus: promoted\nkind: fact\ngrade: direct\nidents: [sh_execution_context]\n---\n# Context ownership contract\n\n"+strings.Repeat("Complete ownership and lifetime evidence. ", 4000))
+	writeDoc(t, root, "docs/alias.md", "---\nstatus: promoted\nkind: fact\naliases: [sh_execution_context]\n---\n# sh_execution_context\n")
+	writeDoc(t, root, "docs/old.md", "---\nstatus: superseded\nkind: fact\nidents: [sh_execution_context]\n---\n# sh_execution_context\n")
+	for _, q := range []string{"sh_execution_context", "SH_EXECUTION_CONTEXT", "shexecutioncontext", "`sh_execution_context`"} {
+		hits, _, err := Query(root, q, 1)
+		if err != nil || len(hits) != 1 || hits[0].Path != "docs/authority.md" {
+			t.Fatalf("exact lookup %q lost its authority: %+v, %v", q, hits, err)
+		}
+	}
+	ranked, _, _, err := rank(root, "sh_execution_context", QueryOptions{Limit: 1})
+	if err != nil || len(ranked) == 0 || !ranked[0].ExactIdentifier {
+		t.Fatalf("explanation must expose exact-name priority: %+v, %v", ranked, err)
+	}
+	// A qualified question still uses relevance; one incidental matching term
+	// must not promote a declaration unrelated to the rest of the question.
+	ranked, _, _, err = rank(root, "sh_execution_context side effect", QueryOptions{Limit: 1})
+	if err != nil || len(ranked) == 0 || ranked[0].Path == "docs/authority.md" {
+		t.Fatalf("qualified question should retain relevance ranking: %+v, %v", ranked, err)
+	}
+	for _, row := range ranked {
+		if row.ExactIdentifier {
+			t.Fatalf("qualified question incorrectly treated as an exact lookup: %+v", row)
+		}
+	}
+}
+
+func TestExactIdentifierKeepsFiltersAndSupersededLast(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, "docs/current.md", "---\nstatus: promoted\nkind: fact\ngrade: direct\n---\n# current sh_execution_context observation\n")
+	writeDoc(t, root, "docs/old.md", "---\nstatus: superseded\nkind: reference\ngrade: inferred\nidents: [sh_execution_context]\n---\n# old contract\n")
+	hits, _, err := Query(root, "sh_execution_context", 2)
+	if err != nil || len(hits) != 2 || hits[0].Path != "docs/current.md" || hits[1].Status != "superseded" {
+		t.Fatalf("exact declarations must not revive superseded authority: %+v, %v", hits, err)
+	}
+	hits, _, err = QueryOpts(root, "sh_execution_context", QueryOptions{Kind: "reference", Grade: "inferred", Limit: 1})
+	if err != nil || len(hits) != 1 || hits[0].Path != "docs/old.md" {
+		t.Fatalf("explicit filters must still select the requested evidence: %+v, %v", hits, err)
+	}
+}
 
 func TestQueryRanksAndLabels(t *testing.T) {
 	root := buildTestCorpus(t)
