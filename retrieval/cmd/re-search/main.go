@@ -50,6 +50,14 @@ func run(args []string) error {
 	sources := fs.String("sources", "", "local, external, or both")
 	offline := fs.Bool("offline", false, "use cached community knowledge without network requests")
 	fs.Parse(rest)
+	// flag.Parse stops at the first positional argument. Reject anything left
+	// after the single query rather than silently dropping filters or words.
+	switch cmd {
+	case "query", "symbol", "explain":
+		if fs.NArg() > 1 {
+			return fmt.Errorf("%s accepts one quoted argument; put flags before it (for example: %s --limit 3 \"<text>\")", cmd, cmd)
+		}
+	}
 
 	resolveRoot := func() (string, error) {
 		if *rootFlag != "" {

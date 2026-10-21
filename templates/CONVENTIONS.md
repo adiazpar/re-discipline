@@ -27,8 +27,9 @@ and verified local/community relationships survive.
     .re-discipline/bin/re-search.exe query "your question or identifier"
 
 Add `--json` for structured output, `--limit N` for more results. Flags
-go BEFORE the question text (`query --limit 8 "..."`) — flags after the
-question are silently ignored. The index rebuilds itself when stale. If
+go BEFORE the quoted question text (`query --limit 8 "..."`). Extra arguments,
+including flags after the question, are rejected instead of silently ignored.
+The index rebuilds itself when stale. If
 results are weak, reword, or grep `docs/` directly. When a real question
 misses a doc you know exists, add it to `golden.jsonl`.
 
