@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
+	"time"
 )
 
 // Copy the running native engine, never the dispatcher or another platform's
@@ -55,8 +58,25 @@ func installProjectBinary(root string) (string, error) {
 	if err := out.Close(); err != nil {
 		return "", err
 	}
-	if err := os.Rename(temp, dest); err != nil {
+	if err := replaceProjectBinary(temp, dest); err != nil {
 		return "", fmt.Errorf("replace project binary (close running copies before retrying): %w", err)
 	}
 	return filepath.ToSlash(relative), nil
+}
+
+func replaceProjectBinary(source, dest string) error {
+	// Windows can retain an executable's file lock briefly after its process
+	// exits. Keep the old binary intact and retry the replacement; a
+	// genuinely running copy still produces the actionable error above.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err := os.Rename(source, dest)
+		// ERROR_SHARING_VIOLATION is 32; it is not covered by os.IsPermission.
+		if err == nil || runtime.GOOS != "windows" ||
+			(!os.IsPermission(err) && !errors.Is(err, syscall.Errno(32))) ||
+			!time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

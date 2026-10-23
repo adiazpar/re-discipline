@@ -24,7 +24,8 @@ Use a current host release and have Git available for the marketplace download.
 **Platforms:** Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64.
 The plugin selects its bundled native engine automatically. No build step,
 Go, Python, Node, Bash on Windows, or separate SQLite installation is required
-by the plugin. WSL uses the Linux build. Windows ARM64 has no dedicated artifact.
+by the plugin. WSL uses the Linux build. Windows 11 ARM64 uses the bundled x64
+engine through Windows emulation; it has no dedicated ARM64 engine artifact.
 
 ### Claude Code
 
@@ -199,13 +200,17 @@ architectures. Verification performed on 2026-10-23:
 | macOS x64 through Rosetta on Apple Silicon | Actual Intel binaries for Claude Code 2.1.291, Codex CLI 0.164.0, and re-search; same packaging and host checks, including 3/3 corpus answers through Codex |
 | Linux ARM64, fresh Ubuntu 24.04 OrbStack machine | Both marketplace installations, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers; native install, both adapters, hooks, and CLI bench |
 | Linux x64, fresh Ubuntu 24.04 OrbStack machine | Same checks under CPU emulation |
+| Windows 11 ARM64, disposable UTM VM | Actual ARM64 and x64 builds of Claude Code 2.1.291 and Codex CLI 0.164.0, with the bundled x64 engine under Windows emulation; marketplace installation, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers; engine refresh, both adapters, and hook commands passed |
 | All five build targets | Pinned builds and byte-for-byte rebuild comparison |
 | Windows x64 and macOS Intel native hosts | CI configured; native host runs still pending |
 
 OrbStack supports [Linux machines](https://docs.orbstack.dev/architecture),
 not Windows or macOS guests. The Intel Mac checks above use Rosetta on macOS;
-they are not a run on Intel hardware. Native Windows and Intel Mac validation
-uses the corresponding CI runners.
+they are not a run on Intel hardware. The Windows checks used a temporary
+Windows setup account, without completing personal account onboarding; x64
+programs ran under Windows ARM emulation. Native Windows x64 and Intel Mac
+validation uses the corresponding CI runners, which have not run for these
+unpublished changes.
 
 The bundled corpus has five documents and three golden questions. These checks
 establish packaging and fixture behavior; they are not a large-corpus quality

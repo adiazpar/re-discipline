@@ -4,6 +4,7 @@ Run from any directory with Python 3. Tests use disposable copies of the fixture
 and plugin, including installation paths with spaces, quotes and Unicode.
 """
 import json
+from contextlib import contextmanager
 import os
 import platform
 from pathlib import Path
@@ -26,6 +27,34 @@ def run(command, **kwargs):
 
 def rpc(i, method, params):
     return {"jsonrpc": "2.0", "id": i, "method": method, "params": params}
+
+
+def engine_command(command):
+    # Python's Windows launcher selects the extensionless Unix script when it
+    # exists beside the EXE. Both real hosts resolve the EXE themselves; the
+    # --hosts checks below cover that behavior independently of this adapter.
+    if os.name == "nt" and not Path(command).suffix:
+        return command + ".exe"
+    return command
+
+
+@contextmanager
+def workspace():
+    directory = tempfile.TemporaryDirectory(prefix="re-discipline-smoke-")
+    try:
+        yield directory.name
+    finally:
+        # Windows may retain an executable lock briefly after process exit.
+        # Retry removal without suppressing persistent cleanup failures.
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except PermissionError:
+                if os.name != "nt" or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.05)
 
 
 def check_codex_host(codex, project, golden):
@@ -95,7 +124,7 @@ def check_codex_host(codex, project, golden):
 
 def main():
     print(f"Test process: {platform.system()} {platform.machine()}", flush=True)
-    with tempfile.TemporaryDirectory(prefix="re-discipline-smoke-") as folder:
+    with workspace() as folder:
         work = Path(folder)
         plugin = work / "plugin space ' $ café"
         plugin.mkdir()
@@ -114,6 +143,10 @@ def main():
                     plugin / "bin" / f"{platform.system().lower()}-{arch}" / "re-search")
         assert local_binary.read_bytes() == artifact.read_bytes(), "Launcher selected the wrong native artifact"
         assert run([str(local_binary), "--version"], cwd=work).stdout.strip() == version
+        # An immediate refresh must tolerate Windows releasing the exited
+        # executable's image lock. The replacement has not been run yet, so
+        # it can also safely stand in for a stale artifact in the next check.
+        run([str(binary), "install-binary", "--root", str(project)], cwd=work)
         # Refresh a stale copy, then confirm running init from that copy is safe.
         local_binary.write_bytes(b"stale binary")
         run([str(binary), "install-binary", "--root", str(project)], cwd=work)
@@ -140,7 +173,7 @@ def main():
             for i, case in enumerate(golden, start=3):
                 requests.append(rpc(i, "tools/call", {"name": "query", "arguments": {
                     "root": str(project), "query": case["q"], "sources": "local", "limit": 1}}))
-            result = run([command, *config["args"]], cwd=cwd,
+            result = run([engine_command(command), *config["args"]], cwd=cwd,
                          input="".join(json.dumps(req) + "\n" for req in requests))
             responses = [json.loads(line) for line in result.stdout.splitlines()]
             assert len(responses) == len(requests), result.stdout
@@ -155,7 +188,7 @@ def main():
         hook_input = json.dumps({"cwd": str(project)})
         claude_hook = json.loads((plugin / ".claude-plugin/hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
         hook_command = claude_hook["command"].replace("${CLAUDE_PLUGIN_ROOT}", str(plugin))
-        result = run([hook_command, *claude_hook["args"]], input=hook_input, cwd=work, env=env)
+        result = run([engine_command(hook_command), *claude_hook["args"]], input=hook_input, cwd=work, env=env)
         assert "docs curated." in result.stdout, result.stdout
         codex_hook = json.loads((plugin / ".codex-plugin/hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
         shells = [["/bin/sh", "-c", codex_hook["command"]]]
