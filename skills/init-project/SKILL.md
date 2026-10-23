@@ -26,12 +26,26 @@ you review the diff before the old tree is deleted)." Stop.
   CONVENTIONS.md      copy of <plugin-root>/templates/CONVENTIONS.md
   docs/  docs/ops/  active/  archive/
   golden.jsonl        empty file
-  bin/re-search.exe   copy of <plugin-root>/bin/re-search.exe
+  bin/re-search      native binary for this machine (re-search.exe on Windows)
   .gitignore          copy of <plugin-root>/templates/project-gitignore
 ```
 
-Re-running init refreshes `CONVENTIONS.md`, `.gitignore`, and the exe
-from the plugin (these three are plugin-owned copies); everything else
+After creating `.re-discipline/`, run the installed plugin's launcher:
+
+```text
+<plugin-root>/bin/re-search install-binary --root <absolute-project-root>
+```
+
+Quote both paths. On Windows, invoke `<plugin-root>/bin/re-search.exe`.
+The launcher selects the native engine, and `install-binary` copies that running
+engine to the project with the correct filename and executable permissions.
+It returns JSON with `path` and `version`; use the returned `path` for
+`{{RE_SEARCH}}` in the marker block. Do not ask the user to choose an OS,
+architecture, binary, or build command. Do not copy the dispatcher by itself.
+Run the returned project path with `--version` to verify it before reporting success.
+
+Re-running init refreshes `CONVENTIONS.md`, `.gitignore`, and the project
+binary from the plugin (these three are plugin-owned copies); everything else
 is user data — never touch it.
 
 ## 2. Shared memory decision
@@ -57,7 +71,8 @@ natively (it walks AGENTS.md files from the git root to the cwd); Claude
 Code does NOT read it automatically and instead imports it. Wire both:
 
 **AGENTS.md** — render `<plugin-root>/templates/marker-block.md` with
-`{{SHARED_MEMORY}}` → `enabled`/`disabled`, then apply:
+`{{SHARED_MEMORY}}` → `enabled`/`disabled` and `{{RE_SEARCH}}` → the
+project path returned by `install-binary`, then apply:
 
 - markers absent → append the block (create the file if missing);
 - exactly one well-formed `<!-- re-discipline:start -->` …

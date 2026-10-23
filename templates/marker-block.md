@@ -2,7 +2,7 @@
 ## re-discipline
 
 - Curated knowledge base: `.re-discipline/docs/`. Search it BEFORE
-  investigating: `.re-discipline/bin/re-search.exe query "<question>"`
+  investigating: `{{RE_SEARCH}} query "<question>"`
 - Pass the active project's absolute `root` in retrieval MCP calls. Normal
   queries include configured community sources and optional assistance.
 - Active campaigns (one per task): `.re-discipline/active/`

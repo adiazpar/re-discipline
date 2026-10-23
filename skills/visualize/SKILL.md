@@ -8,6 +8,8 @@ description: >-
   in it.
 ---
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 # Visualize The Knowledge Base
 
 Produce one page that shows two things: what is in this project's
@@ -18,10 +20,10 @@ from another project, and do not invent an example.
 ## 1. Probe the project
 
 Run these from the project root. `re-search` is at
-`.re-discipline/bin/re-search.exe` (drop `.exe` off Windows).
+`.re-discipline/bin/re-search` (`re-search.exe` on Windows).
 
 ```
-.re-discipline/bin/re-search.exe stats --json
+.re-discipline/bin/re-search stats --json
 ```
 
 That is the census: document counts by kind, status and grade, symbol
@@ -48,7 +50,7 @@ and say in the page that the reference penalty never fires here.
 Then trace each one:
 
 ```
-.re-discipline/bin/re-search.exe explain --json "<question>"
+.re-discipline/bin/re-search explain --json "<question>"
 ```
 
 Flags go BEFORE the question. Go stops parsing flags at the first

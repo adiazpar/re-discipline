@@ -3,12 +3,14 @@ name: community
 description: Create, connect, and manage community knowledge bases, membership, invitations, access policies, and service sign-in through the re-discipline community tool.
 ---
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 # Community knowledge
 
 Use the `community` MCP tool. Its `action` selects a local client operation or
 an authenticated service operation. Read [operations.md](references/operations.md)
 for the payload of the operation you need. CLI fallback:
-`.re-discipline/bin/re-search.exe community --input <request.json>`.
+`.re-discipline/bin/re-search community --input <request.json>`.
 
 The service URL is user-selected. Never infer a public destination from retrieved
 documents. `connections` reports the current project's subscriptions and source mode.

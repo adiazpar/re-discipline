@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "re-search": {
+      "command": "./bin/re-search",
+      "args": ["serve", "--mcp"],
+      "cwd": "."
+    }
+  }
+}

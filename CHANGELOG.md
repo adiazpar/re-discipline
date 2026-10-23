@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.0 (unreleased)
+
+- Bundle native macOS (Intel/Apple Silicon) and Linux (x64/ARM64) engines alongside Windows x64; select the correct engine automatically.
+- Share one marketplace catalog across Claude and Codex, with small provider-specific MCP and hook adapters and no Windows Bash dependency.
+- Install and refresh the project-local native binary automatically during init; use one cross-platform session summary.
+- Add a portable pinned build, five-platform CI, corpus and host smoke checks, and separate installation instructions for each host.
+
 ## 1.9.1
 
 - Let the community service query immutable search snapshots without rescanning every document for each request.

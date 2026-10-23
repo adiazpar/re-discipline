@@ -1,0 +1,16 @@
+#!/bin/sh
+# POSIX entry point. Windows process launchers resolve re-search.exe instead.
+# Keep cwd and every argument intact; MCP resolves the project per tool call.
+set -eu
+bin_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+case "$(uname -s)" in
+    Darwin) os=darwin ;;
+    Linux) os=linux ;;
+    *) echo "re-search: unsupported operating system: $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+    arm64|aarch64) arch=arm64 ;;
+    x86_64|amd64) arch=amd64 ;;
+    *) echo "re-search: unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+exec "$bin_dir/$os-$arch/re-search" "$@"

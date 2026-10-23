@@ -27,6 +27,11 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "session-start" {
+		// The optional hook is read-only and must never prevent a session.
+		writeSessionStatus(os.Stdin, os.Stdout)
+		return nil
+	}
 	if len(args) > 0 && (args[0] == "--version" || args[0] == "version") {
 		fmt.Println(version)
 		return nil
@@ -75,6 +80,16 @@ func run(args []string) error {
 	}
 
 	switch cmd {
+	case "install-binary":
+		root, err := resolveRoot()
+		if err != nil {
+			return err
+		}
+		path, err := installProjectBinary(root)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"path": path, "version": version})
 	case "status":
 		root, err := resolveRoot()
 		if err != nil {

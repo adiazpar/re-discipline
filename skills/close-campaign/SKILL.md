@@ -5,6 +5,8 @@ description: >-
   summary, archive the folder. A file move, not a proof obligation.
 ---
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 # Close A Campaign
 
 1. **Final promotion sweep** over `active/<slug>/findings/`. For each
@@ -18,9 +20,9 @@ description: >-
      subfolder;
    - reject → leave it in the campaign folder (it archives with the
      campaign; nothing is destroyed).
-2. Run `.re-discipline/bin/re-search.exe index` (rebuilds the index and
+2. Run `.re-discipline/bin/re-search index` (rebuilds the index and
    regenerates `docs/INDEX.md`).
-3. Optionally run `.re-discipline/bin/re-search.exe bench` and add any
+3. Optionally run `.re-discipline/bin/re-search bench` and add any
    questions this campaign answered to `golden.jsonl`.
 4. In `CAMPAIGN.md`: set `Status: closed`, add a short summary — what
    was achieved, key promoted findings, dead ends worth remembering.

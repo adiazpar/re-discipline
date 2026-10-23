@@ -5,32 +5,36 @@ on:
   pull_request:
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-15, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: retrieval/go.mod
-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Vet and test
         working-directory: retrieval
         run: |
           go vet ./...
           go test ./...
-
-      - name: Canonical build (also checks manifest version consistency)
-        run: pwsh scripts/build.ps1 -Output bin/ci-re-search.exe
-
-      - name: Stale binary check
-        shell: pwsh
+      - name: Verify native artifact matches the pinned canonical build
+        run: go run ./scripts/build.go -check
+      - name: Install reference agent hosts and the plugin through each marketplace
         run: |
-          $committed = (Get-FileHash bin/re-search.exe).Hash
-          $rebuilt   = (Get-FileHash bin/ci-re-search.exe).Hash
-          if ($committed -ne $rebuilt) {
-            throw "bin/re-search.exe is stale: source changed without 'pwsh scripts/build.ps1'. committed=$committed rebuilt=$rebuilt"
-          }
-
-      - name: Bench fixture corpus
-        run: bin/ci-re-search.exe bench --root retrieval/testdata/fixture
+          npm install --global @anthropic-ai/claude-code@2.1.291 @openai/codex@0.164.0
+          claude plugin marketplace add ./
+          claude plugin install re-discipline@re-discipline --scope user
+          codex plugin marketplace add ./
+          codex plugin add re-discipline@re-discipline
+      - name: Verify native install, corpus, MCP adapters, hooks, and real host discovery
+        run: python scripts/smoke.py --hosts

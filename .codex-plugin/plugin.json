@@ -1,6 +1,6 @@
 {
   "name": "re-discipline",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Evidence-based reverse-engineering knowledge: local retrieval, shared community libraries, offline search, and reviewed publication.",
   "author": {
     "name": "Alex Diaz",
@@ -15,16 +15,8 @@
     "workflow"
   ],
   "skills": "./skills/",
-  "mcpServers": {
-    "re-search": {
-      "command": "bin/re-search.exe",
-      "args": [
-        "serve",
-        "--mcp"
-      ],
-      "cwd": "."
-    }
-  },
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "hooks": "./.codex-plugin/hooks.json",
   "interface": {
     "displayName": "Re-Discipline",
     "shortDescription": "Curated RE knowledge: search it, campaign it, promote findings.",
@@ -35,6 +27,6 @@
       "Read",
       "Write"
     ],
-    "defaultPrompt": "Search the project knowledge base with the re-search query tool before investigating anything. Pass the active project's absolute root in query, symbol and community tool calls so the plugin searches the intended workspace. Follow .re-discipline/CONVENTIONS.md for reports, findings, and promotion."
+    "defaultPrompt": "Search with re-search before investigating. Pass the active project's absolute root and follow .re-discipline/CONVENTIONS.md."
   }
 }

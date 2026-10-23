@@ -8,3 +8,7 @@
 *.go text eol=lf
 go.mod text eol=lf
 go.sum text eol=lf
+
+# POSIX launcher must keep its shebang and LF endings on Windows checkouts.
+bin/re-search text eol=lf
+bin/*/re-search binary

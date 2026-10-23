@@ -7,6 +7,8 @@ or "delete and rebuild" for search indexes. Publication receipts are provenance:
 retain `.re-discipline/community/` when moving a workspace so retry identities
 and verified local/community relationships survive.
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 ## Layout
 
 - `docs/` — curated truth. One atomic claim or topic per file. `docs/ops/`
@@ -19,12 +21,12 @@ and verified local/community relationships survive.
 - `archive/<campaign-slug>/` — closed campaigns.
 - `golden.jsonl` — retrieval regression questions:
   `{"q": "...", "expect": "docs/..."}` per line.
-- `bin/re-search.exe`, `index.db` — search tool and its disposable index
-  (both gitignored; re-run init to restore the exe).
+- `bin/re-search`, `index.db` — search tool and its disposable index
+  (both gitignored; re-run init to restore the native binary).
 
 ## Searching (do this before investigating anything)
 
-    .re-discipline/bin/re-search.exe query "your question or identifier"
+    .re-discipline/bin/re-search query "your question or identifier"
 
 Add `--json` for structured output, `--limit N` for more results. Flags
 go BEFORE the quoted question text (`query --limit 8 "..."`). Extra arguments,
@@ -110,7 +112,7 @@ cross-reference bullet lists.
    matches evidence?), search `docs/` for duplicates first, resolve
    conflicts (higher grade wins, or record both), set
    `status: promoted`, move into `docs/`, run
-   `.re-discipline/bin/re-search.exe index`.
+   `.re-discipline/bin/re-search index`.
    Investigators never promote their own findings.
 4. Correcting a doc later: edit it, set `status: superseded`, link the
    replacement. Git history is the provenance trail.

@@ -5,10 +5,12 @@ description: >-
   task. Creates the campaign folder and records the goal in-session.
 ---
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 # Open A Campaign
 
 1. **Search first.** Run
-   `.re-discipline/bin/re-search.exe query "<the goal>"` — existing
+   `.re-discipline/bin/re-search query "<the goal>"` — existing
    docs may already answer part or all of it. Cite what you find.
 2. Pick a short kebab-case slug (e.g. `demon-transforms`).
 3. Create:

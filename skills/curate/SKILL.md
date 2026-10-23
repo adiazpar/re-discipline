@@ -7,6 +7,8 @@ description: >-
   brief.
 ---
 
+CLI examples use `re-search`; on Windows use `re-search.exe`.
+
 # Curate Knowledge
 
 Distillation happens at the point of production, by the producer — the
@@ -52,7 +54,7 @@ moment never comes back.
 Skim each candidate (atomic? evidence cited? grade matches evidence?),
 search `docs/` for duplicates first, reconcile applicability and evidence
 (a higher grade does not erase a contradictory observation), set `status: promoted`, move into `docs/`, run
-`.re-discipline/bin/re-search.exe index`. You review claims — you never
+`.re-discipline/bin/re-search index`. You review claims — you never
 re-derive reports.
 
 ## Correcting promoted docs

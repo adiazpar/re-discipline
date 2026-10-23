@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/re-search\" session-start",
+            "commandWindows": "powershell.exe -NoProfile -Command \"& ([IO.Path]::Combine([Environment]::GetEnvironmentVariable('CLAUDE_PLUGIN_ROOT'), 'bin', 're-search.exe')) session-start\""
+          }
+        ]
+      }
+    ]
+  }
+}
