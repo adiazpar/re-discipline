@@ -202,15 +202,14 @@ architectures. Verification performed on 2026-10-23:
 | Linux x64, fresh Ubuntu 24.04 OrbStack machine | Same checks under CPU emulation |
 | Windows 11 ARM64, disposable UTM VM | Actual ARM64 and x64 builds of Claude Code 2.1.291 and Codex CLI 0.164.0, with the bundled x64 engine under Windows emulation; marketplace installation, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers; engine refresh, both adapters, and hook commands passed |
 | All five build targets | Pinned builds and byte-for-byte rebuild comparison |
-| Windows x64 and macOS Intel native hosts | CI configured; native host runs still pending |
+| Native GitHub Actions runners: Windows x64, macOS ARM64/x64, Linux ARM64/x64 | [All five jobs passed](https://github.com/adiazpar/re-discipline/actions/runs/40023056384): Go tests and vet, reproducible native artifacts, both marketplace installations, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers, both adapters, and hook commands |
 
 OrbStack supports [Linux machines](https://docs.orbstack.dev/architecture),
 not Windows or macOS guests. The Intel Mac checks above use Rosetta on macOS;
 they are not a run on Intel hardware. The Windows checks used a temporary
 Windows setup account, without completing personal account onboarding; x64
 programs ran under Windows ARM emulation. Native Windows x64 and Intel Mac
-validation uses the corresponding CI runners, which have not run for these
-unpublished changes.
+checks also passed on the corresponding GitHub Actions runners linked above.
 
 The bundled corpus has five documents and three golden questions. These checks
 establish packaging and fixture behavior; they are not a large-corpus quality
