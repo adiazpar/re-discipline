@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
   "version": "1.10.0",
-  "description": "Evidence-based reverse-engineering knowledge: local retrieval, shared community libraries, offline search, and reviewed publication.",
+  "description": "Evidence-based reverse-engineering knowledge: local retrieval and remote community search, with operator-owned publishing.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"

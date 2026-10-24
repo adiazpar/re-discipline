@@ -10,8 +10,8 @@ import (
 )
 
 func validateRetrieval(mode string) error {
-	if mode != "" && mode != "sync" && mode != "remote" {
-		return fmt.Errorf("retrieval must be remote or sync")
+	if mode != "" && mode != "remote" {
+		return fmt.Errorf("community retrieval is remote-only; synchronization is no longer supported")
 	}
 	return nil
 }
@@ -19,7 +19,7 @@ func validateRetrieval(mode string) error {
 // RemoteQuery retrieves only matching results, without synchronizing the library.
 func RemoteQuery(ctx context.Context, conn Connection, query string, opts engine.Options) (QueryResult, error) {
 	var out QueryResult
-	client, err := NewClient(conn.Service)
+	client, err := NewConnectionClient(conn)
 	if err != nil {
 		return out, err
 	}
@@ -34,9 +34,36 @@ func RemoteQuery(ctx context.Context, conn Connection, query string, opts engine
 		return out, err
 	}
 	for i := range out.Hits {
+		if !resultScopeMatches(out.Hits[i], conn.CommunityID) {
+			return QueryResult{}, fmt.Errorf("community response contains conflicting source identity")
+		}
 		remoteOrigin(&out.Hits[i], conn)
 	}
 	return out, nil
+}
+
+// Older services may omit identity fields. Explicit contradictory identities
+// must never be silently relabeled as evidence from the requested community.
+func resultScopeMatches(hit Result, cid string) bool {
+	if hit.CommunityID != "" && hit.CommunityID != cid {
+		return false
+	}
+	for _, location := range hit.Locations {
+		if location.CommunityID != "" && location.CommunityID != cid {
+			return false
+		}
+	}
+	for _, nested := range hit.Contributions {
+		if !resultScopeMatches(nested, cid) {
+			return false
+		}
+	}
+	for _, nested := range hit.Versions {
+		if !resultScopeMatches(nested, cid) {
+			return false
+		}
+	}
+	return true
 }
 
 func remoteOrigin(hit *Result, conn Connection) {
@@ -46,5 +73,8 @@ func remoteOrigin(hit *Result, conn Connection) {
 	hit.Locations = []Location{{Source: conn.Alias, Service: conn.Service, CommunityID: conn.CommunityID, FindingID: hit.FindingID, Revision: hit.Revision, CanonicalID: hit.CanonicalID, URL: hit.URL}}
 	for i := range hit.Contributions {
 		remoteOrigin(&hit.Contributions[i], conn)
+	}
+	for i := range hit.Versions {
+		remoteOrigin(&hit.Versions[i], conn)
 	}
 }

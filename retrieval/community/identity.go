@@ -50,7 +50,7 @@ func submissionKey(d Draft) string {
 // Reconcile refreshes disposable receipts directly from the authoritative server.
 // It never downloads the community corpus or writes publications.db.
 func Reconcile(root string, c Connection, legacy []Adoption) (map[string]any, error) {
-	client, err := NewClient(c.Service)
+	client, err := NewConnectionClient(c, root)
 	if err != nil {
 		return nil, err
 	}

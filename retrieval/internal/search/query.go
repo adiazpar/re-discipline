@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -26,13 +27,14 @@ type Hit struct {
 // QueryOptions carries optional constraints for QueryOpts. The zero
 // value means "current default behavior": limit 8, no filtering.
 type QueryOptions struct {
-	Root       string
-	Assistance string // configured (default) or off; provider is always optional
-	Sources    string // local, external, or both; consumed by the community client
-	Offline    bool   // avoid remote requests; consumed by the community client
-	Limit      int    // <= 0 means 8
-	Kind       string // filter to this kind (fact|ops|reference); empty = no filter
-	Grade      string // filter to this grade (direct|inferred|reported); empty = no filter
+	Root        string
+	Assistance  string   // configured (default) or off; provider is always optional
+	Sources     string   // local, external, or both; consumed by the community client
+	Communities []string // explicit connected aliases; required when more than one is connected
+	Offline     bool     // avoid remote requests; consumed by the community client
+	Limit       int      // <= 0 means 8
+	Kind        string   // filter to this kind (fact|ops|reference); empty = no filter
+	Grade       string   // filter to this grade (direct|inferred|reported); empty = no filter
 }
 
 // BM25 column weights for the three indexed columns (title, body,
@@ -80,13 +82,28 @@ func QueryOpts(root, q string, opts QueryOptions) ([]Hit, []string, error) {
 // QuerySnapshot reads an explicitly built immutable index. Its owner must select
 // a new snapshot when content changes. Mutable project queries use QueryOpts.
 func QuerySnapshot(root, q string, opts QueryOptions) ([]Hit, []string, error) {
+	return QuerySnapshotContext(context.Background(), root, q, opts)
+}
+func QuerySnapshotContext(ctx context.Context, root, q string, opts QueryOptions) ([]Hit, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if _, err := os.Stat(IndexPath(root)); err != nil {
 		return nil, nil, err
 	}
-	if !schemaCurrent(IndexPath(root)) {
-		return nil, nil, fmt.Errorf("snapshot index is corrupt or has an unsupported format")
+	ranked, _, warnings, err := rankIndexContext(ctx, root, q, opts, false)
+	if err != nil {
+		return nil, warnings, err
 	}
-	return queryIndex(root, q, opts, false)
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	hits := make([]Hit, 0, min(limit, len(ranked)))
+	for _, h := range ranked[:min(limit, len(ranked))] {
+		hits = append(hits, h.Hit)
+	}
+	return hits, warnings, nil
 }
 
 func queryIndex(root, q string, opts QueryOptions, refresh bool) ([]Hit, []string, error) {
@@ -135,6 +152,9 @@ func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, err
 }
 
 func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, string, []string, error) {
+	return rankIndexContext(context.Background(), root, q, opts, refresh)
+}
+func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, string, []string, error) {
 	var warnings []string
 	if refresh {
 		warnings = EnsureFresh(root)
@@ -152,6 +172,15 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 		return nil, match, warnings, err
 	}
 	defer db.Close()
+	if !refresh {
+		var version string
+		if err := db.QueryRowContext(ctx, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&version); err != nil {
+			return nil, match, warnings, err
+		}
+		if version != indexFormatVersion {
+			return nil, match, warnings, fmt.Errorf("snapshot index has an unsupported format")
+		}
+	}
 	if opts.Limit <= 0 {
 		opts.Limit = 8
 	}
@@ -191,7 +220,7 @@ func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, st
 		fetch = rerankFetchMin
 	}
 	args = append(args, fetch)
-	rows, err := db.Query(q1, args...)
+	rows, err := db.QueryContext(ctx, q1, args...)
 	if err != nil {
 		return nil, match, warnings, fmt.Errorf("query failed: %w", err)
 	}

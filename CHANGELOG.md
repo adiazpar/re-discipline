@@ -2,6 +2,26 @@
 
 ## 1.10.0 (unreleased)
 
+- Require two human confirmation pauses for community deletion, with a durable per-community freeze and optional resumable, verified knowledge-only Zstandard archive. Exclude member/account identities, keys and access settings; preserve other communities and reopen safely on cancellation or expiry.
+
+- Add operator-only permanent community deletion, including its documents/history, access grants, background jobs, indexes and queued work. Resume interrupted derived-file cleanup, preserve unrelated communities, and remove the calling project's matching link/key automatically.
+
+- Connect one project to one community with an OS-stored Ed25519 private key, signed requests and replay protection. Use single-use private invitations, renewable 180-day inactivity leases, explicit disconnect and indexed expiry cleanup; load-test 1,000 project keys across public/private communities.
+
+- Share retrieval capacity between communities and then reader connections without fixed authenticated minute quotas; bound automatic busy-read retries and reject contradictory community provenance. Add reader-flood, credential-quota and concurrent document-ID isolation tests.
+
+- Size shared retrieval capacity from CPU, memory and database headroom; replace fixed per-community caps with cost-aware fair queues, cancellation, deadlines, overload protection and operator `server.stats`.
+- Schedule document reads alongside searches; batch result hydration, cache immutable revision maps within a byte budget, and coalesce/cancel cold-index builds. Add equal/skewed/single-community and agent search/read load tests.
+
+- Make community retrieval remote-only; retire sync and dashboard skills, migrate old sync settings to remote, and stop exposing corpus-download routes.
+- Restrict all creation and uploads to the server operator. Replace account linking with project key connections, automatic public joining, and revocable private invitations.
+- Allow concurrent searches on immutable per-community indexes, bound active requests/searches, prepare indexes in the background, and add a disposable PostgreSQL-backed load test with 1,000 readers.
+
+- Consolidate the optional community server, schema, dashboard, and tests into `server/`, sharing the engine directly and removing dependence on a separate service repository or centrally hosted endpoint.
+- Route community skills to owner-hosted servers; add a repeatable local Docker/OrbStack setup and credential-free MCP `server.ping`. Setup mode exposes database-backed health only, with community access disabled.
+- Add automatic local-owner access, private community creation and trusted publication, with two-community retrieval/isolation tests through both provider adapters. Reuse one PostgreSQL database and the shared retrieval engine with separate community indexes.
+- Require private community creation and owner-only changes to public; remove unlisted visibility from the API, dashboard, and skills, and migrate existing unlisted communities to private.
+- Reject conflicting project destinations and legacy multi-community retrieval; invalidate withdrawn findings correctly when addressed by slug.
 - Bundle native macOS (Intel/Apple Silicon) and Linux (x64/ARM64) engines alongside Windows x64; select the correct engine automatically.
 - Share one marketplace catalog across Claude and Codex, with small provider-specific MCP and hook adapters and no Windows Bash dependency.
 - Install and refresh the project-local native binary automatically during init; use one cross-platform session summary.
@@ -62,7 +82,7 @@ The community skills document all service operations for management through chat
 
 ## 1.6.1 - 2026-09-07
 
-The hosted community service moves to `https://167.99.51.162`, with direct GitHub
+The then-hosted community service moved to a dedicated host, with direct GitHub
 sign-in. Existing users sign in to the new service and reconnect their community
 alias. Community IDs and memberships are preserved. Offline caches and drafts
 remain local; queued drafts retain their original destination and must be reviewed

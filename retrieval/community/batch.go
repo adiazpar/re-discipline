@@ -157,7 +157,7 @@ func FlushBatch(ctx context.Context, root, alias, grant string) (any, error) {
 	}
 	for _, key := range order {
 		drafts := groups[key]
-		client, e := NewClient(drafts[0].Connection.Service)
+		client, e := NewConnectionClient(drafts[0].Connection, root)
 		if e != nil {
 			return nil, e
 		}

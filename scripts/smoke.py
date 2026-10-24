@@ -3,6 +3,7 @@
 Run from any directory with Python 3. Tests use disposable copies of the fixture
 and plugin, including installation paths with spaces, quotes and Unicode.
 """
+import argparse
 import json
 from contextlib import contextmanager
 import os
@@ -57,7 +58,7 @@ def workspace():
                 time.sleep(.05)
 
 
-def check_codex_host(codex, project, golden):
+def check_codex_host(codex, project, golden, service=None, community_cases=None):
     """Query the installed plugin through Codex, without starting a model turn."""
     with tempfile.TemporaryFile(mode="w+") as errors:
         process = subprocess.Popen([codex, "app-server", "--stdio"], cwd=project,
@@ -104,8 +105,31 @@ def check_codex_host(codex, project, golden):
             skills = call("skills/list", {"cwds": [str(project)], "forceReload": True})
             found = [skill for entry in skills["data"] for skill in entry["skills"]
                      if "/re-discipline/" in skill["path"].replace("\\", "/")]
-            assert len(found) == 10, found
-            print(f"Real Codex host: 10 skills, {len(golden)}/{len(golden)} corpus answers through installed MCP plugin")
+            assert len(found) == 8, found
+            print(f"Real Codex host: 8 skills, {len(golden)}/{len(golden)} corpus answers through installed MCP plugin")
+            if service:
+                result = call("mcpServer/tool/call", {"threadId": thread_id, "server": "re-search",
+                    "tool": "community", "arguments": {"action": "server.ping", "service": service}})
+                assert not result.get("isError"), result
+                health = json.loads(result["content"][0]["text"])
+                assert health["ok"] and health["protocol"] == 1, health
+                print(f"Real Codex host: community server.ping passed ({health.get('mode', 'legacy')})")
+            if community_cases:
+                def plugin_tool(name, arguments):
+                    response = call("mcpServer/tool/call", {"threadId": thread_id, "server": "re-search",
+                        "tool": name, "arguments": dict(root=str(project), **arguments)})
+                    assert not response.get("isError"), response
+                    return json.loads(response["content"][0]["text"])
+                for community in community_cases:
+                    plugin_tool("community", {"action": "connect", "service": service,
+                        "community": community["id"], "alias": community["alias"], "retrieval": "remote"})
+                    result = plugin_tool("query", {"query": "fixtureclock", "sources": "external",
+                        "communities": [community["alias"]]})
+                    assert len(result["hits"]) == 1 and result["hits"][0]["community_id"] == community["id"], result
+                combined = plugin_tool("query", {"query": "fixtureclock", "sources": "external",
+                    "communities": [c["alias"] for c in community_cases]})
+                assert {h["community_id"] for h in combined["hits"]} == {c["id"] for c in community_cases}, combined
+                print("Real Codex host: automatic owner credential, two community connections, isolated and combined retrieval passed")
         except Exception:
             errors.seek(0)
             print(errors.read()[-4000:], file=sys.stderr)
@@ -123,6 +147,16 @@ def check_codex_host(codex, project, golden):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--hosts", action="store_true")
+    parser.add_argument("--service", help="Explicit community origin to check through both MCP adapters and optional real Codex host")
+    parser.add_argument("--community-report", type=Path, help="Two-community fixture report to verify through the real Codex host; requires --hosts and matching --service")
+    args = parser.parse_args()
+    community_cases = None
+    if args.community_report:
+        report = json.loads(args.community_report.read_text())
+        assert args.hosts and args.service == report["service"] and report["passed"] and report["synthetic"], report
+        community_cases = report["communities"]
     print(f"Test process: {platform.system()} {platform.machine()}", flush=True)
     with workspace() as folder:
         work = Path(folder)
@@ -173,6 +207,9 @@ def main():
             for i, case in enumerate(golden, start=3):
                 requests.append(rpc(i, "tools/call", {"name": "query", "arguments": {
                     "root": str(project), "query": case["q"], "sources": "local", "limit": 1}}))
+            if args.service:
+                requests.append(rpc(len(requests)+1, "tools/call", {"name": "community", "arguments": {
+                    "action": "server.ping", "service": args.service}}))
             result = run([engine_command(command), *config["args"]], cwd=cwd,
                          input="".join(json.dumps(req) + "\n" for req in requests))
             responses = [json.loads(line) for line in result.stdout.splitlines()]
@@ -183,6 +220,12 @@ def main():
                 answer = json.loads(response["result"]["content"][0]["text"])
                 assert answer["hits"][0]["path"] == case["expect"], (provider, case, answer)
             print(f"{provider} MCP adapter: handshake, 3 tools, {len(golden)}/{len(golden)} golden answers at rank 1")
+            if args.service:
+                result = responses[-1]["result"]
+                assert not result.get("isError"), result
+                health = json.loads(result["content"][0]["text"])
+                assert health["ok"] and health["protocol"] == 1, health
+                print(f"{provider} MCP adapter: community server.ping passed ({health.get('mode', 'legacy')})")
 
         env = dict(os.environ, CLAUDE_PLUGIN_ROOT=str(plugin))
         hook_input = json.dumps({"cwd": str(project)})
@@ -204,7 +247,7 @@ def main():
             assert "docs curated." in result.stdout, result.stdout
         print("Claude exec hook and Codex shell hook: workspace summary passed")
 
-        if "--hosts" in sys.argv:
+        if args.hosts:
             # CI installs both hosts and this marketplace before this check.
             # Verify the real Claude process launcher too, especially .exe
             # resolution on Windows where no POSIX shell may be required.
@@ -217,7 +260,7 @@ def main():
             plugins = json.loads(run([codex, "plugin", "list", "--marketplace", "re-discipline", "--json"], cwd=project).stdout)
             assert any(p["name"] == "re-discipline" and p["enabled"] for p in plugins["installed"]), plugins
             print("Real hosts: Claude MCP connection and Codex installed-plugin discovery passed")
-            check_codex_host(codex, project, golden)
+            check_codex_host(codex, project, golden, args.service, community_cases)
 
 
 if __name__ == "__main__":

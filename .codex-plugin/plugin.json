@@ -1,7 +1,7 @@
 {
   "name": "re-discipline",
   "version": "1.10.0",
-  "description": "Evidence-based reverse-engineering knowledge: local retrieval, shared community libraries, offline search, and reviewed publication.",
+  "description": "Evidence-based reverse-engineering knowledge: local retrieval and remote community search, with operator-owned publishing.",
   "author": {
     "name": "Alex Diaz",
     "email": "alexdiaz0923@gmail.com"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Re-Discipline",
     "shortDescription": "Curated RE knowledge: search it, campaign it, promote findings.",
-    "longDescription": "Curate reverse-engineering findings in .re-discipline/docs/, search local and connected community libraries, and carry accepted knowledge offline. Create communities, invite collaborators, publish selected portable findings, and review contributions through your agent or the optional dashboard.",
+    "longDescription": "Curate reverse-engineering findings in .re-discipline/docs/ and search local or remote community knowledge. Server operators create communities and publish findings; readers connect to individual public or private search engines without downloading a corpus.",
     "developerName": "Alex Diaz",
     "category": "Productivity",
     "capabilities": [

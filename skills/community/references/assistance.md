@@ -14,7 +14,7 @@ Never put a key in tracked configuration, a tool argument, public documentation
 or a publication draft. `status` reports availability without returning the key.
 
 Project assistance covers the configured local and community candidates. Existing
-source selection, remote versus synchronized retrieval, offline behavior, ACLs
+source selection, remote retrieval, offline behavior, ACLs
 and freshness warnings still apply. Provider opt-in permits sending selected
 readable claim projections from those sources to TypeSafe. Service-side assistance
 separately requires operator configuration and the community owner's
@@ -39,7 +39,7 @@ The ignored `.re-discipline/assistance.json` stores project opt-in.
 `.re-discipline/cache/jev/judgments.db` stores validated answers and usage, without
 claim bodies. Cache keys bind the complete projected input, community/project,
 model and rubric. Exact identifiers bypass ranking. Any missing or invalid
-judgment retains the complete ordinary order; offline cache misses never trigger
+judgment retains the complete ordinary order; unavailable remote sources never trigger
 network calls. Status, warnings, corrections, variants and attribution survive
 ranking. A high relevance score is not a calibrated truth probability.
 

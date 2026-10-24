@@ -10,7 +10,9 @@ type SymbolHits = search.SymbolHits
 
 var Query = search.QueryOpts
 var QuerySnapshot = search.QuerySnapshot
+var QuerySnapshotContext = search.QuerySnapshotContext
 var Parse = search.ParseDoc
 var Build = search.BuildIndexFile
+var BuildContext = search.BuildIndexFileContext
 var Symbols = search.LookupSymbol
 var TryLock = search.TryLock

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"regexp"
@@ -57,11 +58,20 @@ func StripRelationLinks(body string) string {
 // BuildIndexFile writes a complete FTS5 index + manifest to dbPath.
 // Corpus problems degrade to warnings; only I/O or SQL failures error.
 func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
-	metas, err := ScanDocs(root)
+	return BuildIndexFileContext(context.Background(), root, dbPath)
+}
+func BuildIndexFileContext(ctx context.Context, root, dbPath string) ([]Doc, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	metas, err := scanDocsContext(ctx, root)
 	if err != nil {
 		return nil, nil, err
 	}
-	docs, warnings := LoadDocs(root, metas)
+	docs, warnings := loadDocsContext(ctx, root, metas)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	symMeta := ScanSymbols(root)
 	syms, symWarnings := LoadSymbols(root)
 	warnings = append(warnings, symWarnings...)
@@ -97,18 +107,22 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		`CREATE INDEX symbols_name ON symbols(name COLLATE NOCASE)`,
 	}
 	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(ctx, s); err != nil {
 			return nil, warnings, err
 		}
 	}
-	if _, err := db.Exec(`INSERT INTO indexmeta(key, value) VALUES('format', ?)`, indexFormatVersion); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO indexmeta(key, value) VALUES('format', ?)`, indexFormatVersion); err != nil {
 		return nil, warnings, err
 	}
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, warnings, err
 	}
+	defer tx.Rollback()
 	for _, d := range docs {
+		if err := ctx.Err(); err != nil {
+			return nil, warnings, err
+		}
 		indexBody := StripRelationLinks(d.Body)
 		parts := ExpandIdentifiers(d.Title + " " + indexBody)
 		parts = append(parts, d.Tags...)
@@ -130,7 +144,7 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 			parts = append(parts, ExpandIdentifiers(a)...)
 		}
 		idents := strings.Join(parts, " ")
-		if _, err := tx.Exec(`INSERT INTO docs(title, body, idents, path, status, kind, grade) VALUES(?,?,?,?,?,?,?)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO docs(title, body, idents, path, status, kind, grade) VALUES(?,?,?,?,?,?,?)`,
 			d.Title, indexBody, idents, d.Path, d.Status, d.Kind, d.Grade); err != nil {
 			tx.Rollback()
 			return nil, warnings, err
@@ -151,7 +165,7 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 					declared = append(declared, collapsed)
 				}
 			}
-			if _, err := tx.Exec(`INSERT INTO docmeta(path, evidence, idents, build, text_digest) VALUES(?,?,?,?,?)`,
+			if _, err := tx.ExecContext(ctx, `INSERT INTO docmeta(path, evidence, idents, build, text_digest) VALUES(?,?,?,?,?)`,
 				d.Path, strings.Join(d.Evidence, "\n"), strings.Join(declared, " "), d.Build, d.TextDigest); err != nil {
 				tx.Rollback()
 				return nil, warnings, err
@@ -159,7 +173,7 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		}
 	}
 	for _, s := range syms {
-		if _, err := tx.Exec(`INSERT INTO symbols(name, kind, render, source) VALUES(?,?,?,?)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO symbols(name, kind, render, source) VALUES(?,?,?,?)`,
 			s.Name, s.Kind, s.Render, s.Source); err != nil {
 			tx.Rollback()
 			return nil, warnings, err
@@ -169,7 +183,7 @@ func BuildIndexFile(root, dbPath string) ([]Doc, []string, error) {
 		metas = append(metas, *symMeta)
 	}
 	for _, m := range metas {
-		if _, err := tx.Exec(`INSERT INTO manifest(path, mtime, size) VALUES(?,?,?)`, m.Path, m.MTime, m.Size); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO manifest(path, mtime, size) VALUES(?,?,?)`, m.Path, m.MTime, m.Size); err != nil {
 			tx.Rollback()
 			return nil, warnings, err
 		}

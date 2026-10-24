@@ -5,6 +5,13 @@ description: Review published claims, applicability and overlapping information 
 
 # Review community claims
 
+Only the server operator may review or modify community documents. Reader
+connections have no review or upload authority.
+Review targets an explicitly connected owner-hosted community. Check its service
+with `server.ping` before opening a review queue. A setup-only server has no
+accessible queue; report that state and follow the
+[community hosting workflow](../community/references/hosting.md).
+
 Use `community` with the active project's absolute `root` and the
 [operation reference](../community/references/operations.md). Operate only within
 the user's delegated review authority. Read the current community policy.
@@ -13,8 +20,7 @@ Load `submission.list` with `group:attention`, following every `next` cursor wit
 `after`. Load `submission.packet` for a selected submission. It contains the exact
 submission, compact permitted comparisons, a proposed publication effect and a
 revision-bound token. No provider call is required to open a review. Read complete
-referenced claims whenever an excerpt is truncated. Contributor views do not
-expose other contributors' pending work.
+referenced claims whenever an excerpt is truncated.
 
 Assess community scope, portability and complete applicability. Publication is a
 publisher's assertion of correctness; public evidence is optional. Missing private
@@ -44,7 +50,6 @@ warnings; refuted/superseded claims leave ordinary retrieval and keep history.
 Corrections invalidate old equivalence decisions until reviewed again.
 
 `finding.withdraw` permanently removes a finding and related live content. Use it
-only for an authorized removal, never as a shortcut for correction. Offline copies
-are removed on the next sync; existing backups follow retention policy. Never
+only for an authorized removal, never as a shortcut for correction. Already returned content cannot be recalled; existing backups follow retention policy. Never
 promise perfect semantic classification. Jev advice does not replace permissions,
 review policy, local empirical verification or human decisions about ambiguity.

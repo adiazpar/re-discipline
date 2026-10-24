@@ -24,7 +24,7 @@ func Revise(ctx context.Context, root, id string) (Draft, error) {
 		return d, fmt.Errorf("resolve the queued transfer with its existing key before revising")
 	}
 	if d.State == "submitted" {
-		client, e := NewClient(d.Connection.Service)
+		client, e := NewConnectionClient(d.Connection, root)
 		if e != nil {
 			return d, e
 		}

@@ -7,10 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adiazpar/re-discipline/retrieval/semantic"
-
-	"github.com/zalando/go-keyring"
 )
 
 type Command struct {
@@ -28,6 +27,10 @@ type Command struct {
 }
 
 func Execute(ctx context.Context, root string, p Command) (any, error) {
+	// A server health check needs neither a local project nor a saved credential.
+	if p.Action == "server.ping" && p.Service != "" {
+		return Ping(ctx, p.Service)
+	}
 	if p.Root != "" {
 		var err error
 		root, err = ProjectRoot(p.Root)
@@ -37,6 +40,10 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 	}
 	if err := validateRetrieval(p.Retrieval); err != nil {
 		return nil, err
+	}
+	switch p.Action {
+	case "sync", "changes", "export", "login.start", "login.finish", "logout", "dashboard", "member.list", "member.set", "member.remove", "invite.create", "invite.list", "invite.revoke", "invite.redeem", "token.list", "token.revoke":
+		return nil, fmt.Errorf("operation retired: communities provide remote search and operator-managed read connections")
 	}
 	if p.Action == "publish.export" {
 		p.Action = "publish.batch.export"
@@ -89,7 +96,7 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 			return nil, e
 		}
 		if p.Retrieval == "" {
-			return nil, fmt.Errorf("select remote or sync retrieval")
+			return nil, fmt.Errorf("community retrieval is remote-only")
 		}
 		s.Retrieval = p.Retrieval
 		return s, SaveSettings(root, s)
@@ -208,6 +215,14 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return nil, err
 	}
 	var conn Connection
+	if p.Alias == "" && readOperation(p.Action) {
+		if len(settings.Connections) > 1 {
+			return nil, fmt.Errorf("disconnect extra legacy links before retrieval")
+		}
+		if len(settings.Connections) == 1 {
+			conn = settings.Connections[0]
+		}
+	}
 	if p.Alias != "" {
 		for _, v := range settings.Connections {
 			if v.Alias == p.Alias {
@@ -220,33 +235,62 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		}
 	}
 	if conn.Service != "" {
+		if (p.Service != "" && strings.TrimRight(p.Service, "/") != conn.Service) || (p.Community != "" && p.Community != conn.CommunityID) {
+			return nil, fmt.Errorf("explicit destination conflicts with the connected alias; use one destination")
+		}
 		p.Service = conn.Service
 		p.Community = conn.CommunityID
 	}
 	if p.Action == "disconnect" {
-		next := settings.Connections[:0]
-		for _, v := range settings.Connections {
-			if v.Alias != p.Alias {
-				next = append(next, v)
-			}
-		}
-		settings.Connections = next
-		if len(next) == 0 {
-			settings.Mode = "local"
-		}
-		if err = SaveSettings(root, settings); err != nil {
-			return nil, err
-		}
-		return map[string]any{"disconnected": p.Alias, "cache_retained": true}, nil
+		return Disconnect(ctx, root, p.Alias)
 	}
 	if p.Service == "" {
 		return nil, fmt.Errorf("provide a service URL or connected alias")
 	}
+	if p.Action == "server.ping" {
+		return Ping(ctx, p.Service)
+	}
 	client, err := NewClient(p.Service)
+	if conn.Service != "" && p.Action != "connect" && p.Action != "community.delete" && p.Action != "community.archive" {
+		client, err = NewConnectionClient(conn, root)
+	}
 	if err != nil {
 		return nil, err
 	}
 	switch p.Action {
+	case "community.archive":
+		var v struct {
+			Ticket string `json:"ticket"`
+		}
+		if err = json.Unmarshal(p.Data, &v); err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, archiveSliceKey{}, time.Now().Add(15*time.Second))
+		return client.DownloadArchive(ctx, p.Community, v.Ticket, p.Path)
+	case "community.delete":
+		if client.Token == "" {
+			return nil, fmt.Errorf("community.delete requires server operator credentials")
+		}
+		var out map[string]any
+		if err = client.Operation(ctx, p.Action, p.Community, json.RawMessage(p.Data), &out); err != nil {
+			return nil, err
+		}
+		if out["community_id"] != p.Community {
+			return nil, fmt.Errorf("server did not confirm deletion of the selected community")
+		}
+		if out["deleted"] != true {
+			return out, nil
+		}
+		for _, linked := range settings.Connections {
+			if linked.Service == client.URL && linked.CommunityID == p.Community {
+				_, e := disconnect(ctx, root, linked.Alias, &linked)
+				out["local_disconnected"] = e == nil
+				if e != nil {
+					out["notice"] = "Community deleted; local connection cleanup needs attention: " + e.Error()
+				}
+			}
+		}
+		return out, nil
 	case "publish.batch.prepare":
 		if conn.Alias == "" {
 			return nil, fmt.Errorf("publication requires a connected alias")
@@ -271,47 +315,17 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 			}
 		}
 		return Reconcile(root, conn, v.Sources)
-	case "login.start":
-		return client.LoginStart(ctx)
-	case "login.finish":
-		return client.LoginFinish(ctx)
-	case "logout":
-		err = keyring.Delete("re-discipline-community", client.URL)
-		return map[string]bool{"signed_out": true}, err
 	case "connect":
-		c, e := client.Connect(ctx, root, p.Alias, p.Community)
-		if e != nil {
-			return nil, e
+		var credentials struct {
+			Invitation string `json:"invitation"`
 		}
-		settings, e := LoadSettings(root)
-		if e != nil {
-			return nil, e
-		}
-		if p.Retrieval != "" {
-			settings.Retrieval = p.Retrieval
-			if e = SaveSettings(root, settings); e != nil {
+		if len(p.Data) > 0 {
+			if e := json.Unmarshal(p.Data, &credentials); e != nil {
 				return nil, e
 			}
 		}
-		if settings.Retrieval == "remote" {
-			return c, nil
-		}
-		_, e = client.Sync(ctx, root, c)
-		if e != nil {
-			return map[string]any{"connection": c, "sync_error": e.Error()}, nil
-		}
-		return c, nil
-	case "sync":
-		if conn.Alias == "" {
-			return nil, fmt.Errorf("sync requires a connected alias")
-		}
-		return client.Sync(ctx, root, conn)
-	case "dashboard":
-		u := client.URL
-		if p.Community != "" {
-			u += "/communities/" + p.Community
-		}
-		return map[string]string{"url": u}, nil
+		client.Invitation = credentials.Invitation
+		return client.Connect(ctx, root, p.Alias, p.Community)
 	case "publish.prepare":
 		if conn.Alias == "" {
 			return nil, fmt.Errorf("publication requires a connected alias")
@@ -358,9 +372,9 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
 		"root":      map[string]any{"type": "string", "description": "Absolute active project root; use it when calling through a plugin."},
-		"action":    map[string]any{"type": "string", "description": "status, assistance.status/set, connections, connect, disconnect, source.set, login.start, login.finish, logout, mode.set, retrieval.set, sync, dashboard, publish.prepare/preview/update/revise/queue/flush/export/list/reconcile, community.create/list/get/update, member.list/set/remove, invite.create/list/revoke/redeem, publication.resolve/receipts, submission.create/list/get/packet/review/resolve, health.list/review, import.create/list/revoke, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, changes, export, usage, audit.list, token.list/revoke"},
-		"retrieval": map[string]any{"type": "string", "enum": []string{"remote", "sync"}, "description": "Persistent project-wide community transport; remote queries the server without a KB download, sync maintains an offline cache. Use with connect or retrieval.set."},
-		"service":   map[string]any{"type": "string", "description": "HTTPS service origin; credentials remain in the OS credential store"}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload; use the community skill reference for schemas"}}, "required": []string{"action"}}
+		"action":    map[string]any{"type": "string", "description": "server.ping (read-only service/database health; no login), status, assistance.status/set, connections, connect, disconnect, source.set, mode.set, retrieval.set, publish.prepare/preview/update/revise/queue/flush/export/list/reconcile, community.create/list/get/update/delete (delete defaults to a preview; separate lock and final confirm steps require explicit human responses; operator only), community.archive (operator-only resumable knowledge archive download to path; never deletes), server.stats (operator only), access.create/list/revoke (single-use invitations, connection status and revocation), publication.resolve/receipts, submission.create/list/get/packet/review/resolve, health.list/review, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, usage, audit.list"},
+		"retrieval": map[string]any{"type": "string", "enum": []string{"remote"}, "description": "Community retrieval is remote-only. No corpus download or offline cache."},
+		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; each project links one community. See the community skill reference."}}, "required": []string{"action"}}
 }
 
 func ReadCommandFile(path string) ([]byte, error) {

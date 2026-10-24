@@ -72,33 +72,6 @@ func TestServerCopyMatchesAndCorrectionsWithoutLedger(t *testing.T) {
 	}
 }
 
-func TestOfflineRefutationAndEquivalentWarnings(t *testing.T) {
-	root := t.TempDir()
-	c := Connection{Service: "https://example.test", CommunityID: "community", Alias: "doom"}
-	db, err := cacheDB(root, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := portable()
-	db.Exec(`INSERT INTO meta VALUES('cursor','2')`)
-	active := Change{FindingID: "corroboration", Revision: "one", Status: "active", Document: d}
-	refuted := Change{FindingID: "canonical", Revision: "two", Status: "refuted", Reason: "Original assumption disproven", Document: d}
-	for _, v := range []Change{active, refuted} {
-		db.Exec(`INSERT INTO assessments VALUES(?,?)`, v.FindingID, string(mustJSON(v)))
-		db.Exec(`INSERT INTO fingerprints VALUES(?,?,?)`, TextDigest(d.Markdown), v.FindingID, v.Revision)
-	}
-	relations := []Relation{{SourceID: active.FindingID, SourceRevision: active.Revision, TargetID: refuted.FindingID, TargetRevision: "old", Kind: "equivalent", Current: false}}
-	db.Exec(`INSERT INTO meta VALUES('relations',?)`, string(mustJSON(relations)))
-	db.Close()
-	dir := filepath.Join(root, ".re-discipline", "docs")
-	os.MkdirAll(dir, 0700)
-	os.WriteFile(filepath.Join(dir, "claim.md"), []byte(d.Markdown), 0600)
-	hits, err := matchLocal(context.Background(), root, []Result{{Source: "local", Path: "docs/claim.md"}}, c, true)
-	if err != nil || len(hits[0].Warnings) < 2 {
-		t.Fatalf("cached validity/linked warning lost: %+v %v", hits, err)
-	}
-}
-
 func TestFingerprintPreservesClaimDifferences(t *testing.T) {
 	d := portable()
 	copy := d

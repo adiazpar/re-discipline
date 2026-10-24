@@ -189,8 +189,8 @@ func ValidateLibrary(l Library) error {
 	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,62}$`).MatchString(l.Slug) {
 		return fmt.Errorf("slug must contain 3 to 63 lowercase letters, digits, or hyphens")
 	}
-	if l.Visibility != "public" && l.Visibility != "unlisted" && l.Visibility != "private" {
-		return fmt.Errorf("visibility must be public, unlisted, or private")
+	if l.Visibility != "public" && l.Visibility != "private" {
+		return fmt.Errorf("visibility must be public or private")
 	}
 	if len(strings.TrimSpace(l.Policy.Scope)) < 10 || len(l.Policy.Scope) > 8000 {
 		return fmt.Errorf("scope must contain 10 to 8000 characters")

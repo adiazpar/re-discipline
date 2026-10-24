@@ -230,6 +230,7 @@ spending model tokens; they do not simulate a complete agent-led research sessio
 | `skills/`, `templates/` | Shared agent workflows and project files |
 | `bin/` | POSIX launcher, Windows executable, and four native Unix binaries |
 | `retrieval/`, `scripts/` | Engine source, portable build, and packaging smoke test |
+| `server/` | Optional owner-hosted community server, database migrations and tests; shares `retrieval/` directly |
 
 Neither a root `.mcp.json` nor `.agents/plugins/marketplace.json` is needed.
 Both hosts accept the same MCP JSON shape, but their local path resolution
@@ -267,50 +268,121 @@ use `re-search.exe`. The MCP tools select the native binary automatically.
 
 ## Community knowledge
 
-The optional [community service](https://167.99.51.162)
-adds shared libraries to local retrieval. Its backend lives in the separate
-[community repository](https://github.com/adiazpar/re-discipline-community).
-The plugin remains usable without an account or network connection.
+A community is a remote knowledge base and search index hosted by its operator.
+One server supports several isolated communities. The operator alone creates,
+uploads, reviews and corrects documents. Everyone else connects for read-only
+search. The server uses the same retrieval engine source as the plugin; the
+plugin sends queries and receives selected results, never a corpus download.
 
-Community connections allow up to five seconds to establish TCP, while connected
-requests retain a 90-second allowance for services waking from an idle state.
-Unreachable sources remain visible as warnings; local results are still returned.
-This does not change configured sources, permissions or offline-cache preferences.
+Every community starts private. The operator may make it public afterward:
 
-For live community search without downloading the KB, tell your agent:
-"Connect to this community with server-only retrieval and search both local and
-community knowledge." The agent passes `retrieval: "remote"` on `connect`, or
-uses `retrieval.set` for an existing connection. This preference is stored in
-`.re-discipline/community.json`, separately from `mode: local|external|both`.
-Remote mode returns only matching results and needs connectivity; it never
-synchronizes the whole library or falls back to cached community content.
-Server-only retrieval is the default for new projects and settings without a
-recorded transport. `retrieval: "sync"` explicitly enables offline caching;
-existing explicit sync preferences are preserved.
+- **Public:** anyone can explicitly connect and receive a credential limited to
+  that community. A Doom connection cannot query Godzilla, even if both are public.
+- **Private:** the operator issues a single-use invitation for that community.
+  Making a public community private revokes its public connections.
 
+No accounts, passwords or GitHub linking are required. Each project has its own
+key pair for one community. Private keys stay in the operating system credential
+store; the server stores public keys. Only the operator can list all hosted
+communities, issue invitations or revoke connections.
 
-- `/re-discipline:community` — sign in, create or connect a library, invite
-  collaborators, and choose local, external, or combined retrieval.
-- `/re-discipline:publish` — prepare selected portable findings from `docs/`,
-  review the package, and explicitly submit it. Operational and local environment
-  material is excluded; the service enforces permissions and acceptance policy.
-- `/re-discipline:review` — inspect and accept or return contributions.
-- `/re-discipline:sync` — download accepted revisions for offline search.
-- `/re-discipline:dashboard` — open the optional visual management interface.
+### Host a local development server
 
-Use GitHub sign-in once and approve the plugin's device code. Credentials stay in
-the operating system credential store. Each project records its chosen libraries
-and disposable caches in gitignored `.re-discipline/community*` paths. Connecting
-does not upload local documents, and synchronizing does not flush queued drafts.
+Install Python 3 and Docker with Compose; OrbStack provides Docker on macOS. From
+the repository or installed plugin directory, run:
 
-```sh
-.re-discipline/bin/re-search query --sources both --offline "timescale"
+```text
+python3 scripts/community-local.py up --context orbstack
 ```
 
-See [community operations](skills/community/references/operations.md) for the
-JSON interface exposed by the CLI and the `community` MCP tool. Private content
-already downloaded can remain readable offline until the client reconnects and
-learns of a revocation; access revocation cannot erase previously copied content.
+Use `python` on Windows. Omit `--context orbstack` for another local Docker engine.
+The helper builds inside containers, generates private credentials, applies schema
+migrations, and starts `http://127.0.0.1:7346`. Updates preserve the database and
+operator identity. PostgreSQL is not exposed on a host port. The installer enables
+the complete operator/reader API on loopback for testing; it does not publish your
+computer on the internet. Remote hosting requires HTTPS and server provisioning.
+See [server operation](server/README.md).
+
+Ask the community skill to check the server, create a community and connect the
+project. The local operator credential is discovered automatically. New communities
+use trusted operator publication. The existing ingestion checks remain in place.
+
+```json
+{"action":"server.ping","service":"http://127.0.0.1:7346"}
+```
+
+Expect `ok: true`, `mode: "ready"`, and `community_enabled: true`.
+`python3 scripts/community-local.py status` checks the installation; `stop` stops
+it while retaining data. `up --setup-only` exposes health checks only.
+
+### Connect and search
+
+A project is your local research folder containing `.re-discipline/`. It connects
+to **one community**. Other projects can connect independently to communities on
+the same server or another operator's server.
+
+For a public community, ask the agent to connect this project to its server URL
+and community UUID or slug. For a private community, the operator creates an
+invitation with `access.create`; pass it once as `connect` data `{invitation:"…"}`.
+The plugin handles key creation, request signing and renewal automatically.
+`.re-discipline/community.json` contains only the server, community, alias and a
+public key and nonsecret key reference. No private key is saved in the project or sent to the server.
+
+Windows uses Credential Manager, macOS uses Keychain, and Linux uses an unlocked
+Secret Service keyring. A headless Linux client needs that OS service available;
+the plugin reports an unavailable store instead of saving an unencrypted key.
+The hosted server itself needs no desktop keyring.
+
+Connecting changes local-only source mode to `both`: local research plus this
+project's remote community. Use `local` or `external` to search only that source.
+The server verifies signed requests, enforces community scope and rejects replays.
+HTTPS is required outside localhost. There is no repeated login prompt.
+
+`disconnect` removes the server connection and deletes the local key. If offline,
+it deletes the local key and reports that remote removal could not be confirmed.
+Requests renew access automatically, at most once daily. A connection unused for
+180 days expires and is pruned, including when someone manually deletes their key.
+Public access can reconnect automatically after expiry; private access needs a
+new invitation. Unused invitations expire after seven days by default. No backups
+are created. See [connection security and lifecycle](server/docs/connections.md).
+
+Community retrieval is remote-only. There is no sync mode, corpus cache or offline
+fallback. Legacy sync settings are interpreted as remote; old downloaded files
+are never searched. An unavailable community is reported as unavailable while
+successful local results remain usable. Ordinary local
+project retrieval still works offline.
+
+- `/re-discipline:community` — host, connect, create/delete communities and manage read access.
+- `/re-discipline:publish` — operator-only preparation and publication.
+- `/re-discipline:review` — operator-only review and correction.
+
+See [community operations](skills/community/references/operations.md) for MCP
+payloads. Reader credentials cannot upload, change policy, create communities or
+obtain another community's documents.
+
+### Test server load
+
+```text
+python3 scripts/community-load.py --context orbstack
+```
+
+This uses a disposable database, four synthetic corpora and 1,000 reader
+keys, establishing real connections to two public and two private communities.
+It covers one busy reader, one busy community, equal/skewed traffic,
+1,000-request bursts, and agents searching then reading selected full findings.
+The development corpus stays unchanged. Use `--cpus` and `--memory` to test other
+allocations. Reports include successful workflow throughput, per-community latency,
+queue time, memory and rejected work. See [load testing](server/docs/load-testing.md).
+
+Searches and document reads share an automatically sized worker pool. A single
+reader or community can use the entire idle pool; busy communities and their
+reader connections share turns when others need service. Authenticated reads
+have no fixed minute quota. Queues have memory and time limits, and cancelled work
+leaves immediately. The plugin retries temporary busy reads at most twice with
+jitter, retaining the exact community and credential.
+The operator can inspect budgets and queues with `community` action `server.stats`.
+See [resource allocation and agent retrieval](server/docs/search-scheduling.md)
+for the design, edge cases and tuning limits.
 
 ## Symbol lookup
 
@@ -468,8 +540,7 @@ the community tool; see the operation reference in the community skill.
 ## Claims and optional assistance
 
 Publication shares concise claims, complete applicability and attribution; private
-research stays local. Use one `publish.prepare` route for selected files and the
-single Publish action in the dashboard. The review queue integrates overlap
+research stays local. Only the server operator publishes, using `publish.prepare` for selected files. The review queue integrates overlap
 comparisons and background community health. Existing histories remain available.
 
 Optional Jev assistance is built into ordinary local/community queries, selection

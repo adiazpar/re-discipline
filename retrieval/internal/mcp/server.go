@@ -83,13 +83,14 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"root":    map[string]any{"type": "string", "description": "absolute active project directory"},
-						"query":   map[string]any{"type": "string", "description": "natural-language question or identifier"},
-						"limit":   map[string]any{"type": "integer", "description": "max results (default 8)"},
-						"kind":    map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
-						"grade":   map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
-						"sources": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}},
-						"offline": map[string]any{"type": "boolean", "description": "Use cached community knowledge without network requests"},
+						"root":        map[string]any{"type": "string", "description": "absolute active project directory"},
+						"query":       map[string]any{"type": "string", "description": "natural-language question or identifier"},
+						"limit":       map[string]any{"type": "integer", "description": "max results (default 8)"},
+						"kind":        map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
+						"grade":       map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
+						"sources":     map[string]any{"type": "string", "enum": []string{"local", "external", "both"}},
+						"communities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional alias of this project's one connected community. Extra or unknown connections are rejected."},
+						"offline":     map[string]any{"type": "boolean", "description": "Disable remote community requests; local project retrieval remains available"},
 					},
 					"required": []string{"query"},
 				},
@@ -114,14 +115,15 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 			var p struct {
 				Name      string `json:"name"`
 				Arguments struct {
-					Query   string `json:"query"`
-					Root    string `json:"root"`
-					Name    string `json:"name"`
-					Limit   int    `json:"limit"`
-					Kind    string `json:"kind"`
-					Grade   string `json:"grade"`
-					Sources string `json:"sources"`
-					Offline bool   `json:"offline"`
+					Query       string   `json:"query"`
+					Root        string   `json:"root"`
+					Name        string   `json:"name"`
+					Limit       int      `json:"limit"`
+					Kind        string   `json:"kind"`
+					Grade       string   `json:"grade"`
+					Sources     string   `json:"sources"`
+					Communities []string `json:"communities"`
+					Offline     bool     `json:"offline"`
 				} `json:"arguments"`
 			}
 			json.Unmarshal(req.Params, &p)
@@ -135,12 +137,13 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 			switch p.Name {
 			case "query":
 				text, err = query(p.Arguments.Query, search.QueryOptions{
-					Limit:   p.Arguments.Limit,
-					Root:    p.Arguments.Root,
-					Kind:    p.Arguments.Kind,
-					Grade:   p.Arguments.Grade,
-					Sources: p.Arguments.Sources,
-					Offline: p.Arguments.Offline,
+					Limit:       p.Arguments.Limit,
+					Root:        p.Arguments.Root,
+					Kind:        p.Arguments.Kind,
+					Grade:       p.Arguments.Grade,
+					Sources:     p.Arguments.Sources,
+					Communities: p.Arguments.Communities,
+					Offline:     p.Arguments.Offline,
 				})
 			case "symbol":
 				text, err = symbol(p.Arguments.Name, p.Arguments.Limit, p.Arguments.Root)

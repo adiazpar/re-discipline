@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+web/tsconfig.tsbuildinfo
+.data/
+bin/
+web/node_modules/
+web/dist/
+coverage.out
+*.log
+__pycache__/

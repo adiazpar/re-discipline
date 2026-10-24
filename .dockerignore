@@ -1,0 +1,16 @@
+**
+!server/
+!server/**
+!retrieval/
+!retrieval/**
+**/.git
+**/.env
+**/.env.*
+**/.data
+**/node_modules
+**/dist
+**/bin
+**/__pycache__
+**/*.log
+**/index.db*
+**/index.lock

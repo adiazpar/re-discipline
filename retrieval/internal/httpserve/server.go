@@ -40,9 +40,10 @@ func ResultHandler(query ResultFunc, symbol SymbolFunc) http.Handler {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		hits, err := query(q, search.QueryOptions{
 			Sources: r.URL.Query().Get("sources"), Offline: r.URL.Query().Get("offline") == "true",
-			Limit: limit,
-			Kind:  r.URL.Query().Get("kind"),
-			Grade: r.URL.Query().Get("grade"),
+			Communities: r.URL.Query()["community"],
+			Limit:       limit,
+			Kind:        r.URL.Query().Get("kind"),
+			Grade:       r.URL.Query().Get("grade"),
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

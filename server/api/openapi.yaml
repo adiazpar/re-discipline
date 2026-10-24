@@ -1,0 +1,69 @@
+openapi: 3.1.0
+info:
+  title: Re-discipline remote community search
+  version: 2.0.0
+  description: >-
+    Operator-owned knowledge bases with community-scoped read-only connections.
+    Only the operator creates communities and uploads documents. New communities
+    start private. Public communities issue read connections automatically;
+    private connections require operator grants. Corpus synchronization, browser
+    login and legacy account/member APIs are not exposed.
+paths:
+  /healthz:
+    get:
+      responses:
+        '200':
+          description: Database healthy and operator configured; mode ready, community_enabled true, remote_only true. Setup mode permits health only.
+        '503':
+          description: Database unavailable or operator not configured.
+  /v1/operations:
+    post:
+      description: >-
+        community.connect registers a signed project public key for an explicitly
+        selected public community, or consumes a single-use private invitation.
+        Reader requests use Ed25519 HTTP Message Signatures; only the operator
+        uses a bearer credential. Readers may call
+        community.get, query, finding.get/history/match/relations/contributions
+        with the exact connected community UUID. Only the operator may create,
+        update, delete, upload, review, correct, withdraw, list hosted communities or call
+        access.create/list/revoke or server.stats. Read operations share fair bounded queues. See skills/community/references/operations.md
+        for operation payloads. Retired operations are rejected.
+        community.delete defaults to a non-destructive prepare step. Lock requires a ticket
+        and explicit archive boolean; confirm requires that ticket, confirm:true and
+        verified download or explicit archive waiver. The skill must pause for human
+        approval before lock and before confirm. community.archive.chunk returns a
+        bounded binary Zstandard frame with index, chain, record count and digest
+        headers; it requires operator credentials and a locked archive session.
+        Cancel or one-hour inactivity expiry reopens the selected community. Archives
+        contain knowledge only and omit identities and access records. Final deletion
+        requires the exact canonical community UUID. Its response reports deleted,
+        already_absent and cleanup_pending. Pending derived-file cleanup retries
+        automatically; it does not restore the deleted community.
+      parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+          description: Bearer operator credential; readers instead send Signature, Signature-Input and Content-Digest headers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              additionalProperties: false
+              properties:
+                action: {type: string}
+                community: {type: string, description: Community UUID; operator and initial connection also accept a slug except community.delete which requires an exact canonical UUID.}
+                data: {type: object}
+      responses:
+        '200': {description: JSON operation result, or application/zstd bytes for community.archive.chunk.}
+        '400': {description: Invalid request or retired operation.}
+        '401': {description: Missing, expired or revoked credential.}
+        '403': {description: Read-only connection cannot perform this operation.}
+        '404': {description: Community or resource unavailable to this connection.}
+        '409': {description: Concurrent change, invalid workflow state/ticket, or export already active.}
+        '423': {description: Community locked pending deletion, or final confirmation prerequisites unmet.}
+        '429': {description: Anonymous setup/invalid-credential abuse limit or community connection-count limit reached; authenticated reads have no minute quota.}
+        '503': {description: Admission/queue capacity or deadline reached, or dependency unavailable; respect Retry-After when present.}

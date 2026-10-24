@@ -2,7 +2,6 @@ package community
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,32 +94,10 @@ func queryClaim(ctx context.Context, root string, hit Result, settings Settings,
 	if conn.CommunityID == "" {
 		return semantic.Claim{}, fmt.Errorf("source is no longer connected")
 	}
-	if settings.Retrieval == "sync" {
-		db, err := cacheDB(root, conn)
-		if err != nil {
-			return semantic.Claim{}, err
-		}
-		defer db.Close()
-		if meta(db, "blocked") == "true" {
-			return semantic.Claim{}, fmt.Errorf("cached source access is blocked")
-		}
-		var revision, body string
-		if err = db.QueryRowContext(ctx, `SELECT revision,document FROM docs WHERE id=?`, hit.FindingID).Scan(&revision, &body); err != nil {
-			return semantic.Claim{}, err
-		}
-		if revision != hit.Revision {
-			return semantic.Claim{}, fmt.Errorf("cached claim changed during query")
-		}
-		var d Document
-		if err = json.Unmarshal([]byte(body), &d); err != nil {
-			return semantic.Claim{}, err
-		}
-		return ProjectClaim(d, hit.Status), nil
-	}
 	if offline {
 		return semantic.Claim{}, fmt.Errorf("remote claim unavailable offline")
 	}
-	client, err := NewClient(conn.Service)
+	client, err := NewConnectionClient(conn, root)
 	if err != nil {
 		return semantic.Claim{}, err
 	}
@@ -314,7 +291,7 @@ func SelectPublication(ctx context.Context, root string, conn Connection, paths 
 	if err != nil {
 		config = semantic.Config{}
 	}
-	client, err := NewClient(conn.Service)
+	client, err := NewConnectionClient(conn, root)
 	if err != nil {
 		return nil, err
 	}

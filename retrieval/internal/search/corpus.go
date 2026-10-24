@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -18,11 +19,15 @@ type FileMeta struct {
 
 // ScanDocs lists every *.md under <root>/.re-discipline/docs/ except
 // docs/INDEX.md, sorted by path. A missing docs dir yields an empty list.
-func ScanDocs(root string) ([]FileMeta, error) {
+func ScanDocs(root string) ([]FileMeta, error) { return scanDocsContext(context.Background(), root) }
+func scanDocsContext(ctx context.Context, root string) ([]FileMeta, error) {
 	base := filepath.Join(root, ".re-discipline")
 	docsDir := filepath.Join(base, "docs")
 	var metas []FileMeta
 	err := filepath.WalkDir(docsDir, func(p string, d fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			if os.IsNotExist(walkErr) {
 				return filepath.SkipAll
@@ -57,9 +62,15 @@ func ScanDocs(root string) ([]FileMeta, error) {
 // LoadDocs reads and parses each listed file. Unreadable files are
 // skipped with a warning — corpus content never fails a build.
 func LoadDocs(root string, metas []FileMeta) ([]Doc, []string) {
+	return loadDocsContext(context.Background(), root, metas)
+}
+func loadDocsContext(ctx context.Context, root string, metas []FileMeta) ([]Doc, []string) {
 	var docs []Doc
 	var warnings []string
 	for _, m := range metas {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
 		raw, err := os.ReadFile(filepath.Join(root, ".re-discipline", filepath.FromSlash(m.Path)))
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s: %v (skipped)", m.Path, err))

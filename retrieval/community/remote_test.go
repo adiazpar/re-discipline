@@ -51,8 +51,8 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 		code := status
 		mu.Unlock()
 		switch req.Action {
-		case "community.get":
-			json.NewEncoder(w).Encode(Library{ID: cid, Slug: "doom", Name: "DOOM"})
+		case "community.connect":
+			json.NewEncoder(w).Encode(map[string]any{"community": Library{ID: cid, Slug: "doom", Name: "DOOM"}})
 		case "finding.match":
 			json.NewEncoder(w).Encode([]FindingMatch{})
 		case "query":
@@ -95,7 +95,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 	if result.Hits[0].Source != "local" || result.Hits[1].Source != "doom" || result.Hits[1].Service != h.URL || result.Hits[1].Contributions[0].Source != "doom" {
 		t.Fatalf("source attribution: %+v", result.Hits)
 	}
-	if _, err = os.Stat(cacheRoot(root, settings.Connections[0])); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(root, ".re-discipline", "community", "cache")); !os.IsNotExist(err) {
 		t.Fatalf("remote query created a KB cache: %v", err)
 	}
 	if _, err = Execute(context.Background(), root, Command{Action: "sync", Alias: "doom"}); err == nil {
@@ -124,80 +124,26 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 			t.Fatalf("failed remote query: %+v %v", result, err)
 		}
 	}
-	if _, err = os.Stat(cacheRoot(root, settings.Connections[0])); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(root, ".re-discipline", "community", "cache")); !os.IsNotExist(err) {
 		t.Fatal("failure created cache")
 	}
 }
 
-func TestRetrievalPreferenceMigrationAndValidation(t *testing.T) {
+func TestRemoteOnlyMigratesOldSettings(t *testing.T) {
 	root := t.TempDir()
-	if err := atomicJSON(SettingsPath(root), map[string]any{"mode": "external", "connections": []Connection{}}); err != nil {
+	if err := atomicJSON(SettingsPath(root), map[string]any{"mode": "external", "retrieval": "sync", "connections": []Connection{}}); err != nil {
 		t.Fatal(err)
-	}
-	s, err := LoadSettings(root)
-	if err != nil || s.Retrieval != "remote" {
-		t.Fatalf("legacy settings: %+v %v", s, err)
-	}
-	for _, choice := range []string{"remote", "sync"} {
-		if _, err = Execute(context.Background(), root, Command{Action: "retrieval.set", Retrieval: choice}); err != nil {
-			t.Fatal(err)
-		}
-		s, err = LoadSettings(root)
-		if err != nil || s.Retrieval != choice || s.Mode != "external" {
-			t.Fatalf("preference not persisted independently: %+v %v", s, err)
-		}
-	}
-	for _, choice := range []string{"", "invalid"} {
-		if _, err = Execute(context.Background(), root, Command{Action: "retrieval.set", Retrieval: choice}); err == nil {
-			t.Fatalf("accepted invalid preference %q", choice)
-		}
-	}
-	if _, err = Execute(context.Background(), root, Command{Action: "connect", Service: "https://invalid.example", Community: "doom", Retrieval: "invalid"}); err == nil {
-		t.Fatal("invalid connect preference accepted")
-	}
-	s, err = LoadSettings(root)
-	if err != nil || s.Retrieval != "sync" || len(s.Connections) != 0 {
-		t.Fatalf("failed action changed settings: %+v %v", s, err)
-	}
-}
-
-func TestExplicitSyncConnectStillSynchronizes(t *testing.T) {
-	root := t.TempDir()
-	cid := uuid.NewString()
-	var mu sync.Mutex
-	actions := map[string]int{}
-	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req Request
-		json.NewDecoder(r.Body).Decode(&req)
-		mu.Lock()
-		actions[req.Action]++
-		mu.Unlock()
-		switch req.Action {
-		case "community.get":
-			json.NewEncoder(w).Encode(Library{ID: cid, Slug: "doom"})
-		case "changes":
-			json.NewEncoder(w).Encode(Changes{Library: Library{ID: cid}, Changes: []Change{}})
-		case "finding.relations":
-			json.NewEncoder(w).Encode([]Relation{})
-		default:
-			t.Errorf("unexpected action %s", req.Action)
-		}
-	}))
-	defer h.Close()
-	if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: h.URL, Community: "doom", Alias: "doom", Retrieval: "sync"}); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	changes := actions["changes"]
-	mu.Unlock()
-	if changes != 1 {
-		t.Fatalf("explicit sync connect skipped synchronization: %d", changes)
 	}
 	settings, err := LoadSettings(root)
-	if err != nil || settings.Retrieval != "sync" {
-		t.Fatalf("default transport: %+v %v", settings, err)
+	if err != nil || settings.Retrieval != "remote" {
+		t.Fatalf("legacy settings: %+v %v", settings, err)
 	}
-	if _, err = os.Stat(filepath.Join(cacheRoot(root, settings.Connections[0]), "cache.db")); err != nil {
-		t.Fatal(err)
+	for _, action := range []string{"sync", "changes", "export"} {
+		if _, err := Execute(context.Background(), root, Command{Action: action}); err == nil {
+			t.Fatalf("retired action accepted: %s", action)
+		}
+	}
+	if _, err := Execute(context.Background(), root, Command{Action: "retrieval.set", Retrieval: "sync"}); err == nil {
+		t.Fatal("sync mode accepted")
 	}
 }

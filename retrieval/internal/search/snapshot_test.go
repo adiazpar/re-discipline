@@ -1,6 +1,8 @@
 package search
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -45,5 +47,16 @@ func TestSnapshotQueriesMatchMutableRankingWithoutRescanningDocuments(t *testing
 	}
 	if _, _, err = QuerySnapshot(root, "timescale", opts); err == nil {
 		t.Fatal("corrupt snapshot must fail explicitly")
+	}
+}
+
+func TestSnapshotAndBuildCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := QuerySnapshotContext(ctx, t.TempDir(), "test", QueryOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if _, _, err := BuildIndexFileContext(ctx, t.TempDir(), "unused.db"); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
 	}
 }

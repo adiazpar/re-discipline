@@ -2,7 +2,6 @@ package community
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,50 +43,8 @@ func matchLocal(ctx context.Context, root string, hits []Result, c Connection, c
 		if end > len(digests) {
 			end = len(digests)
 		}
-		if cached {
-			db, err := cacheDB(root, c)
-			if err != nil {
-				return hits, err
-			}
-			if meta(db, "blocked") == "true" {
-				db.Close()
-				return hits, fmt.Errorf("cached access blocked")
-			}
-			for _, hash := range digests[offset:end] {
-				rows, e := db.Query(`SELECT h.finding_id,h.revision,a.state FROM fingerprints h JOIN assessments a ON a.finding_id=h.finding_id WHERE h.digest=?`, hash)
-				if e != nil {
-					db.Close()
-					return hits, e
-				}
-				for rows.Next() {
-					var fid, rid, state string
-					if e = rows.Scan(&fid, &rid, &state); e != nil {
-						rows.Close()
-						db.Close()
-						return hits, e
-					}
-					var change Change
-					if e = json.Unmarshal([]byte(state), &change); e != nil {
-						rows.Close()
-						db.Close()
-						return hits, e
-					}
-					matches = append(matches, FindingMatch{TextDigest: hash, FindingID: fid, Revision: change.Revision, MatchedRevision: rid, Current: rid == change.Revision, Status: change.Status, Reason: change.Reason, ReplacementID: change.ReplacementID, Build: change.Document.Build})
-				}
-				rows.Close()
-				if e = rows.Err(); e != nil {
-					db.Close()
-					return hits, e
-				}
-			}
-			var relations []Relation
-			json.Unmarshal([]byte(meta(db, "relations")), &relations)
-			for i := range matches {
-				matches[i].Warnings = append(matches[i].Warnings, cachedIntegrityAlerts(db, matches[i].FindingID, matches[i].Revision, relations)...)
-			}
-			db.Close()
-		} else {
-			client, err := NewClient(c.Service)
+		{
+			client, err := NewConnectionClient(c, root)
 			if err != nil {
 				return hits, err
 			}
