@@ -20,18 +20,57 @@ func TestProjectionKeepsConditionsAndShowsRemovedResearch(t *testing.T) {
 	if !strings.Contains(p.Markdown, "Requires module X") || !strings.Contains(p.Markdown, "renderer: Vulkan") {
 		t.Fatal("retained conditions lost")
 	}
-	if !p.NeedsReview || !strings.Contains(p.RemovedMaterial, "Vulkan only; fails on OpenGL.") {
-		t.Fatal("qualification loss was hidden from local review")
+	if !strings.Contains(p.RemovedMaterial, "Vulkan only; fails on OpenGL.") {
+		t.Fatal("removed evidence was not retained in the local projection result")
 	}
 	for _, heading := range []string{"  ## Evidence ##", "Evidence\n--------", "## Research log"} {
 		p = ProjectPublication("# Claim\nTrue under conditions.\n" + heading + "\nprivate material\n## Conditions\nVulkan only.")
-		if strings.Contains(p.Markdown, "private material") || !p.NeedsReview || !strings.Contains(p.Markdown, "Vulkan only") {
+		if strings.Contains(p.Markdown, "private material") || !strings.Contains(p.Markdown, "Vulkan only") {
 			t.Fatalf("heading %q: %+v", heading, p)
 		}
 	}
 	p = ProjectPublication("# Claim\n````\n```\n## Evidence\nThis is code, not a section.\n````\n## Evidence\nprivate log")
 	if !strings.Contains(p.Markdown, "This is code") || strings.Contains(p.Markdown, "private log") {
 		t.Fatal("fence length confused section boundaries")
+	}
+}
+
+func TestCuratedProjectionPreservesKnowledge(t *testing.T) {
+	knowledge := "---\nstatus: promoted\nkind: fact\ngrade: direct\nbuild: Example build 123\nidents: [LoadTexture]\ntags: [textures]\n---\n# LoadTexture rejects compressed textures\n\n## Knowledge\n\nCompressed inputs return ERR_UNSUPPORTED.\n\n### Applicability\nDesktop rendering only; other paths are untested.\n\n### Example\n```text\n## Evidence\nThis heading is part of the example, not a section.\n```\n"
+	evidence := "\n## Evidence\n\nReport: archive/textures/reports/R-001.md#loader\n### Script\narchive/textures/work/test.py\n~~~text\n## Knowledge\nprivate trace\n~~~\n"
+	for _, raw := range []string{knowledge + evidence, "\ufeff" + strings.ReplaceAll(knowledge+evidence, "\n", "\r\n")} {
+		p := ProjectPublication(raw)
+		if p.Markdown != knowledge {
+			t.Fatalf("curated knowledge changed: %+v", p)
+		}
+		if len(p.RemovedSections) != 1 || p.RemovedSections[0] != "evidence" || !strings.Contains(p.RemovedMaterial, "private trace") {
+			t.Fatalf("local evidence preview lost: %+v", p)
+		}
+	}
+}
+
+func TestLegacyLayoutsStripEvidence(t *testing.T) {
+	for name, raw := range map[string]string{
+		"missing knowledge":     "# Claim\nDetails.\n## Evidence\nprivate trace",
+		"empty knowledge":       "# Claim\n## Knowledge\n## Evidence\nprivate trace",
+		"heading only":          "# Claim\n## Knowledge\n### Conditions\n## Evidence\nprivate trace",
+		"evidence first":        "# Claim\n## Evidence\nprivate trace\n## Knowledge\nDetails.",
+		"duplicate evidence":    "# Claim\n## Knowledge\nDetails.\n## Evidence\nprivate trace\n## Evidence\nmore traces",
+		"section after":         "# Claim\n## Knowledge\nDetails.\n## Evidence\nprivate trace\n## Conditions\nDesktop only.",
+		"legacy metadata":       "---\nevidence: [archive/report.md]\n---\n# Claim\n## Knowledge\nDetails.\n## Evidence\nprivate trace",
+		"legacy heading":        "# Claim\n## Knowledge\nDetails.\n## Supporting evidence\nprivate trace",
+		"nested research":       "# Claim\n## Knowledge\nDetails.\n### Research log\nprivate trace\n## Evidence\nReport.",
+		"unclosed fence":        "# Claim\n## Knowledge\nDetails.\n## Evidence\nprivate trace\n```\nunclosed",
+		"loose text":            "# Claim\nUnstructured details.\n## Knowledge\nDetails.\n## Evidence\nprivate trace",
+		"multiple titles":       "# Claim\n# Another claim\n## Knowledge\nDetails.\n## Evidence\nprivate trace",
+		"fenced fake knowledge": "# Claim\n```\n## Knowledge\nDetails.\n```\n## Evidence\nprivate trace",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := ProjectPublication(raw)
+			if strings.Contains(p.Markdown, "private trace") {
+				t.Fatalf("legacy boundary leaked evidence: %+v", p)
+			}
+		})
 	}
 }
 
@@ -49,7 +88,6 @@ func TestClaimIdentityRetainsSubjectAndUnknownApplicabilityFields(t *testing.T) 
 		}
 	}
 	b := a
-	b.Evidence = []Evidence{{Label: "Different local research", Unavailable: true}}
 	b.SourcePath = "docs/renamed.md"
 	if ClaimDigest(a) != ClaimDigest(b) {
 		t.Fatal("provenance or path multiplied the claim")
@@ -86,8 +124,5 @@ func TestPlainWorkflowSurvivesMissingOptionalConfiguration(t *testing.T) {
 	out, err := Query(context.Background(), root, "timescale", "local", true, engine.Options{Limit: 1})
 	if err != nil || len(out.Hits) != 1 || len(out.Warnings) == 0 {
 		t.Fatalf("optional config broke search: %+v %v", out, err)
-	}
-	if _, _, err = Prepare(root, Connection{}, "docs/claim.md", "DOOM build 1"); err != nil {
-		t.Fatalf("optional config broke preparation: %v", err)
 	}
 }

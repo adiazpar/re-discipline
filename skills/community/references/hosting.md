@@ -36,18 +36,11 @@ For reproducible load testing:
 python3 scripts/community-load.py --context orbstack
 ```
 
-It creates and drops a disposable database and search cache with four synthetic
-communities (two public/two private) and 1,000 project key connections. It measures single-community, equal,
-skewed, burst, and agent search-then-read traffic. Default resources are two CPUs
-and 512 MiB; `--cpus` and `--memory` test other allocations. The existing corpus
-is unchanged. Reports include per-community latency, queue time, rejected work,
-full-document reads, peak memory and isolation failures. A matched comparison
-runs at least 10,000 judged searches before and during a knowledge archive of
-the fourth community. `--archive-mib` controls the synthetic uncompressed evidence
-size (256 MiB by default); repetitive test data is not a realistic compression
-ratio estimate. The test verifies the local archive before explicitly deleting
-that disposable community and checking the survivors. See
-[load testing](../../../server/docs/load-testing.md) for options and interpretation.
+It creates and drops a disposable database/cache with four communities,
+1,000 signed reader connections and concurrent owner uploads. Query-then-read
+workflows check exact identities, fingerprints and document text. Default resource
+limits are two CPUs and 512 MiB. See [load testing](../../../server/docs/load-testing.md)
+for sizes, report fields and limits of the synthetic test.
 
 The service automatically sizes its shared retrieval pool at startup. Use operator
 `server.stats` with the service origin to inspect budgets and per-community work.

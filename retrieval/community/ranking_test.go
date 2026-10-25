@@ -102,14 +102,14 @@ func TestCommunityExplicitProjectRootIsNotPluginDirectory(t *testing.T) {
 }
 
 func TestRankingFreshnessIncludesNestedClaimsAndIgnoresScores(t *testing.T) {
-	a := Result{FindingID: "canonical", Revision: "r1", Contributions: []Result{{FindingID: "member", Revision: "m1"}}}
+	a := Result{FindingID: "canonical", Fingerprint: "r1"}
 	b := a
 	score := .91
 	b.Relevance = &score
 	if !sameCandidates([]Result{a}, []Result{b}) {
 		t.Fatal("ranking score invalidated unchanged source")
 	}
-	b.Contributions = []Result{{FindingID: "member", Revision: "m2"}}
+	b.Fingerprint = "changed"
 	if sameCandidates([]Result{a}, []Result{b}) {
 		t.Fatal("nested correction escaped freshness validation")
 	}

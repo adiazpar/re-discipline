@@ -270,9 +270,15 @@ use `re-search.exe`. The MCP tools select the native binary automatically.
 
 A community is a remote knowledge base and search index hosted by its operator.
 One server supports several isolated communities. The operator alone creates,
-uploads, reviews and corrects documents. Everyone else connects for read-only
+uploads, replaces and removes documents. Everyone else connects for read-only
 search. The server uses the same retrieval engine source as the plugin; the
 plugin sends queries and receives selected results, never a corpus download.
+
+Local findings contain a complete `Knowledge` section and a final `Evidence`
+section. Evidence references live in that section, not in frontmatter. Uploading
+omits Evidence from a copy; the original and all referenced reports, scripts and
+traces stay local. Conditions and limitations belong in Knowledge so the shared
+finding stands alone.
 
 Every community starts private. The operator may make it public afterward:
 
@@ -304,8 +310,8 @@ computer on the internet. Remote hosting requires HTTPS and server provisioning.
 See [server operation](server/README.md).
 
 Ask the community skill to check the server, create a community and connect the
-project. The local operator credential is discovered automatically. New communities
-use trusted operator publication. The existing ingestion checks remain in place.
+project. The local operator credential is discovered automatically. Uploads use
+the owner-only current-knowledge model described below.
 
 ```json
 {"action":"server.ping","service":"http://127.0.0.1:7346"}
@@ -352,9 +358,22 @@ are never searched. An unavailable community is reported as unavailable while
 successful local results remain usable. Ordinary local
 project retrieval still works offline.
 
-- `/re-discipline:community` — host, connect, create/delete communities and manage read access.
-- `/re-discipline:publish` — operator-only preparation and publication.
-- `/re-discipline:review` — operator-only review and correction.
+Use `/re-discipline:community` for hosting, connections, uploads, community
+management and read access. The old publish and review skills are retired.
+
+### Upload owner knowledge
+
+Ask the agent to upload the curated KB or selected files. `knowledge.upload`
+automatically assigns missing stable finding IDs, excludes Evidence, compares
+fingerprints and sends only new or changed files in bounded batches. A changed
+owner finding replaces its server copy; the latest successful upload wins.
+Renaming keeps identity. Evidence-only edits do not upload again. Missing local
+files never delete remote knowledge automatically.
+
+The UUID lives in finding frontmatter; fingerprints and file metadata are cached
+in the existing disposable `index.db`. A cache loss requires rereading files but
+does not lose identity. `knowledge.status` compares without uploading;
+`verify:true` bypasses file metadata shortcuts. See [upload behavior and bounds](skills/community/references/upload.md).
 
 See [community operations](skills/community/references/operations.md) for MCP
 payloads. Reader credentials cannot upload, change policy, create communities or
@@ -366,13 +385,12 @@ obtain another community's documents.
 python3 scripts/community-load.py --context orbstack
 ```
 
-This uses a disposable database, four synthetic corpora and 1,000 reader
-keys, establishing real connections to two public and two private communities.
-It covers one busy reader, one busy community, equal/skewed traffic,
-1,000-request bursts, and agents searching then reading selected full findings.
-The development corpus stays unchanged. Use `--cpus` and `--memory` to test other
-allocations. Reports include successful workflow throughput, per-community latency,
-queue time, memory and rejected work. See [load testing](server/docs/load-testing.md).
+This uses a disposable database, four synthetic communities and 1,000 reader
+keys. It checks actual query-then-read accuracy with 128 concurrent workflows
+while the owner uploads knowledge into all four communities. The development
+corpus stays unchanged. `--cpus`, `--memory`, `--users`, `--documents` and
+`--requests` vary the experiment. Reports include failures, latency, memory and
+scheduler statistics. See [load testing](server/docs/load-testing.md).
 
 Searches and document reads share an automatically sized worker pool. A single
 reader or community can use the entire idle pool; busy communities and their
@@ -525,27 +543,54 @@ adding a query router you do not need.
 Local retrieval runs on every supported platform. CLI calls start, answer,
 and exit; each agent host manages its own MCP process for the session.
 
-### Community integrity
+### Community knowledge identity
 
-The community service owns source identity, immutable revisions, accepted copy
-attribution, and reasoned validity assessments. Local publication files are
-rebuildable caches. Combined retrieval uses server-certified exact text matches to
-collapse local/community copies and warn about old or refuted local claims.
-Server source mappings also group portability-edited variants while retaining the
-published version and marking the differing local text as unverified.
-Similar contributions require an explicit server review decision; they are never
-silently merged on wording alone. All integrity operations are available through
-the community tool; see the operation reference in the community skill.
+A community stores one current knowledge document per stable finding UUID.
+Fingerprints detect content changes; they are not file identities. PostgreSQL
+stores the current documents; a separate SQLite index per community is rebuilt
+from them and uses the same retrieval engine as the plugin. Uploading queues
+bounded incremental indexing. Search quietly returns the content currently indexed;
+new uploads appear as indexing catches up. Snippets and fingerprints remain
+consistent within each result.
+
+In `both` mode, retrieval selects one copy per finding **before ranking**:
+
+| Compared with the last matching fingerprint | Result |
+| --- | --- |
+| Local and community content match | One result with both locations; local read surface |
+| Only local knowledge changed | Local copy |
+| Only community knowledge changed | Community copy |
+| Both changed, or no matching baseline exists | Local curated copy |
+
+Different copies carry `content_differs`, a `resolution` reason and alternate
+location metadata; the losing text never contributes a second result or ranking
+vote. This also applies when the corrected copy no longer matches the query:
+the obsolete match is omitted. The plugin looks up only candidate identities in
+the local index and sends a bounded list of IDs in the same remote search request.
+There are no extra document downloads or synchronization.
+
+Curation and upload maintain `created_at` and `knowledge_updated_at` in finding
+frontmatter. Evidence-only edits preserve the knowledge date; IDs, dates, Evidence
+and filenames are excluded from the knowledge fingerprint. Dates describe when
+knowledge was maintained, **not which copy wins**. Plain editor changes receive
+their date at the next curation/upload; retrieval detects their content changes
+without waiting for that timestamp.
+
+The existing disposable `index.db` keeps one last matching fingerprint per
+finding/connection, alongside upload and timestamp bookkeeping. An upload receipt
+also establishes a match. Server sequence metadata prevents a delayed index or
+response from undoing that acknowledgement. Rebuilds preserve this bookkeeping;
+cache deletion safely falls back to the local curated copy. No document history
+is stored. `local` and `external` modes remain restricted to their selected source.
 
 ## Claims and optional assistance
 
-Publication shares concise claims, complete applicability and attribution; private
-research stays local. Only the server operator publishes, using `publish.prepare` for selected files. The review queue integrates overlap
-comparisons and background community health. Existing histories remain available.
+Claims and their complete applicability are shared; Evidence and research remain
+local. Only the server operator writes knowledge. There are no contributor roles,
+publication queues, review gates or retained revision histories.
 
-Optional Jev assistance is built into ordinary local/community queries, selection
-and review. It is disabled by default, does not require plugin users to install a
-provider, and never establishes truth or permission. Read the
+Optional Jev assistance ranks query candidates. It is disabled by default and
+never establishes truth or permission. Read the
 [setup and data contract](skills/community/references/assistance.md).
 Always pass the active project `root` in plugin tools; `status` diagnoses the
 selected workspace and source configuration.

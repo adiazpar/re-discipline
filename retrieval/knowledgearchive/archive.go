@@ -14,7 +14,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-const Format = "re-discipline-knowledge-v1"
+const Format = "re-discipline-knowledge-v2"
 const MaxRecord = 4 << 20
 const MaxChunk = 6 << 20
 
@@ -42,13 +42,9 @@ func Chain(previous string, b []byte) string {
 
 // Fields are allowlisted, never copied with SELECT * or object subtraction.
 var Fields = map[string][]string{
-	"manifest":   {"format", "community_id", "name", "scope", "sequence"},
-	"finding":    {"id", "revision", "deleted"},
-	"revision":   {"id", "finding_id", "sequence", "document", "deleted", "created_at", "status", "reason", "replacement_id", "assessment_evidence"},
-	"submission": {"id", "document", "state", "finding_id", "base_revision", "accepted_revision", "contribution_target", "contribution_revision", "created_at"},
-	"review":     {"id", "submission_id", "decision", "rationale", "automated", "created_at"},
-	"relation":   {"source_id", "target_id", "source_revision", "target_revision", "kind", "rationale", "created_at"},
-	"end":        {"records", "chain"},
+	"manifest": {"format", "community_id", "name", "scope", "sequence"},
+	"document": {"id", "path", "markdown", "fingerprint"},
+	"end":      {"records", "chain"},
 }
 
 func Verify(path string) (Summary, error) {

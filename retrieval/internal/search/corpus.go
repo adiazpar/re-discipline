@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/knowledge"
 )
 
 // FileMeta identifies one corpus file for staleness comparison.
@@ -76,7 +78,14 @@ func loadDocsContext(ctx context.Context, root string, metas []FileMeta) ([]Doc,
 			warnings = append(warnings, fmt.Sprintf("%s: %v (skipped)", m.Path, err))
 			continue
 		}
-		d := ParseDoc(m.Path, string(raw))
+		text := string(raw)
+		d := ParseDoc(m.Path, text)
+		// Compute copy metadata only during indexing, from the same bytes as FTS.
+		// Ordinary parsing/query hydration never hashes the document again.
+		if id, err := knowledge.FindingID(text); err == nil && id != "" {
+			d.FindingID = id
+			d.Fingerprint = knowledge.KnowledgeFingerprint(knowledge.ProjectPublication(text).Markdown)
+		}
 		if d.Warning != "" {
 			warnings = append(warnings, m.Path+": "+d.Warning)
 		}

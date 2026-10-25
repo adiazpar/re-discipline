@@ -133,27 +133,3 @@ func TestConfigurationAbsentDoesNotEnableInference(t *testing.T) {
 		t.Fatal("read created project configuration")
 	}
 }
-
-func TestScopeAndTruncationPreventEquivalence(t *testing.T) {
-	confidence := .99
-	j := Judgment{Answers: map[string]Answer{"scope": {Choice: "same", Confidence: &confidence}, "relationship": {Choice: "equivalent", Confidence: &confidence}}}
-	left := Claim{Build: "DOOM Vulkan build 1"}
-	right := left
-	if Relation(j, left, right) != "equivalent" {
-		t.Fatal("lost complete comparison")
-	}
-	right.Truncated = true
-	if Relation(j, left, right) != "unknown" {
-		t.Fatal("truncation certified equivalence")
-	}
-	right.Truncated = false
-	right.Build = "unknown"
-	if Relation(j, left, right) != "unknown" {
-		t.Fatal("unknown applicability became a wildcard")
-	}
-	j.Answers["scope"] = Answer{Choice: "overlap", Confidence: &confidence}
-	right = left
-	if Relation(j, left, right) != "partial" {
-		t.Fatal("overlapping applicability collapsed")
-	}
-}

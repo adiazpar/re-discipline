@@ -13,20 +13,25 @@ import (
 
 // Hit is one ranked query result.
 type Hit struct {
-	Build      string   `json:"build,omitempty"`
-	TextDigest string   `json:"text_digest,omitempty"`
-	Path       string   `json:"path"`
-	Title      string   `json:"title"`
-	Snippet    string   `json:"snippet"`
-	Status     string   `json:"status,omitempty"`
-	Kind       string   `json:"kind,omitempty"`
-	Grade      string   `json:"grade,omitempty"`
-	Evidence   []string `json:"evidence,omitempty"`
+	CreatedAt          string   `json:"created_at,omitempty"`
+	KnowledgeUpdatedAt string   `json:"knowledge_updated_at,omitempty"`
+	FindingID          string   `json:"finding_id,omitempty"`
+	Fingerprint        string   `json:"fingerprint,omitempty"`
+	Build              string   `json:"build,omitempty"`
+	TextDigest         string   `json:"text_digest,omitempty"`
+	Path               string   `json:"path"`
+	Title              string   `json:"title"`
+	Snippet            string   `json:"snippet"`
+	Status             string   `json:"status,omitempty"`
+	Kind               string   `json:"kind,omitempty"`
+	Grade              string   `json:"grade,omitempty"`
+	Evidence           []string `json:"evidence,omitempty"`
 }
 
 // QueryOptions carries optional constraints for QueryOpts. The zero
 // value means "current default behavior": limit 8, no filtering.
 type QueryOptions struct {
+	CompareIDs  []string // bounded local candidate identities, internal remote reconciliation
 	Root        string
 	Assistance  string   // configured (default) or off; provider is always optional
 	Sources     string   // local, external, or both; consumed by the community client
@@ -199,6 +204,7 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		       COALESCE(docmeta.evidence, ''),
 		       COALESCE(docmeta.idents, ''),
 		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
+ COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''), COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, ''),
 		       bm25(docs, %v, %v, %v) AS score,
 		       (? <> '' AND instr(' ' || COALESCE(docmeta.idents, '') || ' ', ' ' || ? || ' ') > 0) AS exact_identifier
 		FROM docs LEFT JOIN docmeta ON docmeta.path = docs.path
@@ -235,7 +241,7 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		var evidence, declared string
 		var score float64
 		var exactIdentifier bool
-		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &score, &exactIdentifier); err != nil {
+		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &h.FindingID, &h.Fingerprint, &h.CreatedAt, &h.KnowledgeUpdatedAt, &score, &exactIdentifier); err != nil {
 			return nil, match, warnings, err
 		}
 		if evidence != "" {

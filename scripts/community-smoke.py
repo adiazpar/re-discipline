@@ -1,7 +1,7 @@
-"""Create two labeled fixture communities and test them through both MCP adapters.
+"""Test owner uploads and scoped readers through both shipped MCP adapters.
 
-Requires an explicitly selected local-owner server. Leaves Doom 2016 and Godzilla
-PS4 synthetic corpora on that server; uses disposable local project directories.
+Requires an explicitly selected local-owner server. Creates and deletes disposable
+Doom and Godzilla fixture communities and temporary local projects.
 No real project files, model calls, browser login, or printed credentials.
 """
 import argparse
@@ -46,211 +46,117 @@ class Adapter:
                                        "action": action, **kwargs})
 
 
-def check_deletion(provider, base, service, survivors):
-    root = base / (provider + "-delete-owner")
-    reader_root = base / (provider + "-delete-reader")
-    for project in [root, reader_root]:
-        (project / ".re-discipline/docs").mkdir(parents=True)
-    local = root / ".re-discipline/docs/local.md"
-    local.write_text("Local research must survive server deletion.\n")
-    owner, reader = Adapter(provider, root, service), Adapter(provider, reader_root, service, reader=True)
-    created = owner.community("community.create", data={"name": "Disposable deletion fixture",
-        "slug": "delete-fixture-" + str(uuid.uuid4()), "policy": {"scope": "Synthetic deletion test only."}})
-    cid = created["id"]
-    try:
-        owner.community("connect", community=cid, alias="delete-fixture")
-        grant = owner.community("access.create", alias="delete-fixture", data={"label": "Deletion test reader", "hours": 1})
-        reader.community("connect", community=cid, alias="delete-fixture", data={"invitation": grant["invitation"]})
-        document = {"source_path": "docs/delete.md", "kind": "fact", "grade": "direct", "build": "Deletion test fixture",
-            "markdown": "---\nstatus: promoted\nkind: fact\ngrade: direct\n---\n# Deletion fixture\nThe deletefixturemarker exists only for this test.\n"}
-        sub = owner.community("submission.create", alias="delete-fixture", data={"idempotency_key": str(uuid.uuid4()), "document": document})
-        deadline = time.monotonic() + 30
-        while sub["state"] == "queued" and time.monotonic() < deadline:
-            time.sleep(.25)
-            sub = owner.community("submission.get", alias="delete-fixture", data={"id": sub["id"]})
-        assert sub["state"] == "accepted", sub
-        assert len(reader.community("query", alias="delete-fixture", data={"query": "deletefixturemarker"})["hits"]) == 1
-        reader.tool("community", {"root": str(reader_root), "action": "community.delete", "alias": "delete-fixture"}, error="operator credentials")
-        preview = owner.community("community.delete", alias="delete-fixture")
-        assert not preview["deleted"] and preview["phase"] == "preview"
-        assert owner.community("connections")["connections"]
-        ticket = preview["ticket"]
-        owner.community("community.delete", alias="delete-fixture", data={"step": "lock", "ticket": ticket, "archive": True})
-        reader.tool("community", {"root": str(reader_root), "action": "query", "alias": "delete-fixture", "data": {"query": "deletefixturemarker"}}, error="pending deletion")
-        archived = owner.community("community.archive", alias="delete-fixture", path=str(base / (provider + "-knowledge.zst")), data={"ticket": ticket})
-        assert archived["verified"] and archived["confirmation_required"] and not archived["deleted"], archived
-        assert archived["summary"]["counts"]["revision"] == 1
-        result = owner.community("community.delete", alias="delete-fixture", data={"step": "confirm", "ticket": ticket, "confirm": True})
-        assert result["deleted"] and not result["cleanup_pending"] and result["local_disconnected"], result
-        assert not owner.community("connections")["connections"]
-        assert local.read_text() == "Local research must survive server deletion.\n"
-        reader.tool("community", {"root": str(reader_root), "action": "query", "alias": "delete-fixture", "data": {"query": "deletefixturemarker"}}, error="resource unavailable")
-        repeat = owner.community("community.delete", community=cid, data={"step":"confirm", "ticket":ticket, "confirm":True})
-        assert repeat["already_absent"] and not repeat["cleanup_pending"], repeat
-        remaining = {c["id"] for c in owner.community("community.list")}
-        assert cid not in remaining and all(c["id"] in remaining for c in survivors)
-        print(provider + ": preview, freeze, knowledge archive, confirmation, deletion and other-community preservation passed")
-        return {"provider": provider, "deleted": True, "cleanup_pending": False, "local_disconnected": True, "archive_verified": True}
-    finally:
-        # Only this UUID was created by this test; never select existing corpora.
-        if any(c["id"] == cid for c in owner.community("community.list")):
-            owner.community("community.delete", community=cid, data={"step":"cancel"})
-            clean = owner.community("community.delete", community=cid)
-            owner.community("community.delete", community=cid, data={"step":"lock", "ticket":clean["ticket"], "archive":False})
-            owner.community("community.delete", community=cid, data={"step":"confirm", "ticket":clean["ticket"], "confirm":True})
-        if reader.community("connections")["connections"]:
-            reader.community("disconnect", alias="delete-fixture")
+def finding(fid, marker, qualifier="initial"):
+    return f"---\nid: {fid}\nstatus: promoted\nkind: fact\ngrade: direct\nidents: [fixtureclock]\n---\n# Synthetic clock\n\n## Knowledge\n{marker} {qualifier} fixtureclock. This is synthetic test knowledge.\n\n## Evidence\nPRIVATE_SMOKE_RESEARCH\n"
+
+
+def delete_fixture(owner, cid, archive_path=None):
+    preview = owner.community("community.delete", community=cid)
+    ticket = preview["ticket"]
+    owner.community("community.delete", community=cid, data={"step":"lock", "ticket":ticket, "archive": archive_path is not None})
+    if archive_path:
+        result = owner.community("community.archive", community=cid, path=str(archive_path), data={"ticket":ticket})
+        while result.get("resume_required"):
+            result = owner.community("community.archive", community=cid, path=str(archive_path), data={"ticket":ticket})
+        assert result["verified"] and result["summary"]["counts"]["document"] == 1, result
+    result = owner.community("community.delete", community=cid, data={"step":"confirm", "ticket":ticket, "confirm":True})
+    assert result["deleted"], result
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--service", required=True)
-    parser.add_argument("--report", type=Path, help="Optional JSON result file (contains no secrets)")
-    args = parser.parse_args()
-    assert args.service.startswith("http://127.0.0.1:"), "This fixture test requires a local server"
-    report = {"service": args.service, "synthetic": True, "communities": [], "providers": []}
-    with tempfile.TemporaryDirectory(prefix="re-discipline-two-communities-") as temp:
-        base = Path(temp)
-        roots = [base / "doom-project", base / "godzilla-project"]
-        for root in roots:
-            (root / ".re-discipline/docs").mkdir(parents=True)
-        adapters = [Adapter(p, root, args.service) for p, root in zip(["claude", "codex"], roots)]
-        health = adapters[0].community("server.ping")
-        assert health["mode"] == "ready" and health["community_enabled"], health
-        existing = {c["slug"]: c for c in adapters[0].community("community.list")}
-        for adapter, name, slug, marker in zip(adapters, ["Doom 2016", "Godzilla PS4"],
-                                              ["doom-2016", "godzilla-ps4"], ["doomfixturemarker", "godzillafixturemarker"]):
-            scope = name + " reverse engineering. Synthetic integration fixtures only; not verified game findings."
-            community = existing.get(slug)
-            if community:
-                assert community["policy"]["scope"] == scope, "Refusing to seed an existing research corpus"
-            else:
-                community = adapter.community("community.create", data={"name": name, "slug": slug, "policy": {"scope": scope}})
-            assert community["visibility"] == "private" and community["policy"]["mode"] == "trusted"
-            adapter.community("connect", community=community["id"], alias=slug, retrieval="remote")
-            # Both communities deliberately use the same source namespace, path,
-            # identifier and retry key, but different text/build applicability.
-            document = {"source_namespace": "integration-fixtures", "source_path": "docs/clock.md",
-                        "kind": "fact", "grade": "direct", "build": name + " synthetic fixture", "evidence": [],
-                        "markdown": "---\nstatus: promoted\nkind: fact\ngrade: direct\nidents: [fixtureclock]\n---\n# " + name +
-                                    " synthetic clock fixture\nThis integration test contains " + marker +
-                                    ". It tests retrieval isolation and makes no claim about the actual game.\n"}
-            key = str(uuid.uuid5(uuid.NAMESPACE_URL, "re-discipline/two-community-fixture/clock-v1"))
-            submission = adapter.community("submission.create", community=community["id"],
-                                           data={"idempotency_key": key, "document": document})
-            replay = adapter.community("submission.create", community=community["id"],
-                                       data={"idempotency_key": key, "document": document})
-            assert replay["id"] == submission["id"], "Retry duplicated a submission"
-            deadline = time.monotonic() + 30
-            while submission["state"] == "queued" and time.monotonic() < deadline:
-                time.sleep(.25)
-                submission = adapter.community("submission.get", community=community["id"], data={"id": submission["id"]})
-            assert submission["state"] == "accepted", submission
-            report["communities"].append({"name": name, "alias": slug, "id": community["id"],
-                                          "finding_id": submission["finding_id"], "marker": marker})
-        assert report["communities"][0]["id"] != report["communities"][1]["id"]
-        assert report["communities"][0]["finding_id"] != report["communities"][1]["finding_id"]
-        # Exercise the skill's real local-file preparation/queue/flush route too.
-        # Queue both independent projects, then verify each flush respects its alias.
-        for root in roots:
-            (root / ".re-discipline/docs/published.md").write_text(
-                "---\nstatus: promoted\nkind: fact\ngrade: direct\n---\n"
-                "# Synthetic publication fixture\n"
-                "The publicationfixture marker tests plugin transfer only; it is not a game finding.\n")
-        drafts = []
-        for adapter, community in zip(adapters, report["communities"]):
-            prepared = adapter.community("publish.prepare", alias=community["alias"],
-                                         build=community["name"] + " synthetic fixture",
-                                         data={"paths": ["docs/published.md"]})
-            assert not prepared["uploaded"] and prepared["items"][0]["state"] == "new", prepared
-            draft_id = prepared["items"][0]["draft_id"]
-            preview = adapter.community("publish.preview", draft_id=draft_id)
-            assert "publicationfixture" in preview["document"]["markdown"], preview
-            adapter.community("publish.queue", data={"draft_ids": [draft_id]})
-            drafts.append(draft_id)
-        for i, (adapter, community) in enumerate(zip(adapters, report["communities"])):
-            flushed = adapter.community("publish.flush", alias=community["alias"])
-            assert flushed["submitted"] == 1 and not flushed["issues"], flushed
-            if i == 0:
-                assert adapters[1].community("publish.preview", draft_id=drafts[1])["state"] == "queued"
-            receipt = adapter.community("publish.preview", draft_id=drafts[i])
-            deadline = time.monotonic() + 30
-            while True:
-                sub = adapter.community("submission.get", alias=community["alias"], data={"id": receipt["submission_id"]})
-                if sub["state"] != "queued" or time.monotonic() >= deadline:
-                    break
-                time.sleep(.25)
-            if sub["state"] == "needs_review":
-                # Similar fixture wording can require a deliberate identity
-                # decision. Use the real revision-bound review gate.
-                packet = adapter.community("submission.packet", alias=community["alias"], data={"id": sub["id"]})
-                assert packet["submission"]["document"]["source_path"] == "docs/published.md", packet
-                assert all(c["reference"]["id"] == community["finding_id"] for c in packet["comparisons"]), packet
-                sub = adapter.community("submission.review", alias=community["alias"], data={
-                    "id": sub["id"], "digest": sub["digest"], "policy_version": sub["policy_version"],
-                    "resolution_version": sub["resolution_version"], "packet_token": packet["token"],
-                    "decision": "accept", "plan": {"mode": "create"},
-                    "rationale": "This synthetic publication-transfer marker is distinct from the synthetic clock marker; retain both test findings."})
-            assert sub["state"] == "accepted", sub
-            assert len(adapter.community("query", alias=community["alias"], data={"query": "publicationfixture"})["hits"]) == 1
-            report["communities"][i]["publication_finding_id"] = sub["finding_id"]
-        assert report["communities"][0]["publication_finding_id"] != report["communities"][1]["publication_finding_id"]
-        for provider in ["claude", "codex"]:
-            for i, community in enumerate(report["communities"]):
-                adapter = Adapter(provider, roots[i], args.service)
-                other = report["communities"][1-i]
-                result = adapter.community("query", alias=community["alias"], data={"query": "fixtureclock"})
-                assert len(result["hits"]) == 1 and result["hits"][0]["community_id"] == community["id"], result
-                assert not adapter.community("query", alias=community["alias"], data={"query": other["marker"]})["hits"]
-                assert not adapter.community("finding.get", alias=community["alias"], data={"id": other["finding_id"]})
-                selected = adapter.tool("query", {"root": str(roots[i]), "sources": "external", "query": "fixtureclock"})
-                assert len(selected["hits"]) == 1 and selected["hits"][0]["community_id"] == community["id"], selected
-                adapter.tool("community", {"root": str(roots[i]), "service": args.service, "action": "connect",
-                    "community": other["id"], "alias": other["alias"]}, error="already connects")
-                assert not (roots[i] / ".re-discipline/community/cache").exists()
-            report["providers"].append(provider)
-            print(provider + ": separate projects, scoped key retrieval, publication, and second-link rejection passed")
-        doom, godzilla = report["communities"]
-        for operator in adapters:
-            reader_root = base / (operator.provider + "-reader")
-            (reader_root / ".re-discipline/docs").mkdir(parents=True)
-            label = "adapter-smoke-" + str(uuid.uuid4())
-            grant = operator.community("access.create", community=doom["id"], data={"label": label, "hours": 1})
-            reader = Adapter(operator.provider, reader_root, args.service, reader=True)
-            try:
-                reader.community("connect", community=doom["id"], alias="doom", data={"invitation": grant["invitation"]})
-                # Retry must reuse the project key, even though the invitation is consumed.
-                reader.community("connect", community=doom["id"], alias="doom", data={"invitation": grant["invitation"]})
-                own = reader.community("query", alias="doom", data={"query": "fixtureclock"})
-                assert len(own["hits"]) == 1 and own["hits"][0]["community_id"] == doom["id"]
-                reader.tool("community", {"root": str(reader_root), "service": args.service, "action": "query",
-                    "community": godzilla["id"], "data": {"query": "fixtureclock"}}, error="conflicts")
-                for action in ["submission.create", "community.create", "access.create"]:
-                    reader.tool("community", {"root": str(reader_root), "action": action,
-                        "alias": "doom", "data": {}}, error="read-only")
-                grants = operator.community("access.list", community=doom["id"])
-                for item in grants:
-                    if item["label"] == label:
-                        operator.community("access.revoke", community=doom["id"], data={"id": item["id"]})
-                reader.tool("community", {"root": str(reader_root), "action": "query", "alias": "doom",
-                    "data": {"query": "fixtureclock"}}, error="revoked")
-            finally:
-                if reader.community("connections")["connections"]:
-                    reader.community("disconnect", alias="doom")
-            print(operator.provider + ": OS key storage, invitation reuse, write denial, revocation and key deletion passed")
-        for adapter, community in zip(adapters, report["communities"]):
-            connections = adapter.community("connections")
-            assert len(connections["connections"]) == 1 and connections["retrieval"] == "remote", connections
-            disconnected = adapter.community("disconnect", alias=community["alias"])
-            assert disconnected["server_removed"], disconnected
-        report["reader_permissions_passed"] = True
-        report["deletion"] = [check_deletion(provider, base, args.service, report["communities"])
-                              for provider in ["claude", "codex"]]
-    report["passed"] = True
-    if args.report:
-        args.report.write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps(report, indent=2))
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--service",required=True)
+    parser.add_argument("--report",type=Path)
+    args=parser.parse_args()
+    assert args.service.startswith("http://127.0.0.1:"), "Requires a local test server"
+    report={"synthetic":True,"providers":[],"passed":False}
+    with tempfile.TemporaryDirectory(prefix="re-discipline-upload-smoke-") as temp:
+        base=Path(temp);fixtures=[]
+        try:
+            for provider,name in [("claude","Doom 2016"),("codex","Godzilla PS4")]:
+                root=base/provider;(root/".re-discipline/docs").mkdir(parents=True)
+                owner=Adapter(provider,root,args.service)
+                assert owner.community("server.ping")["mode"]=="ready"
+                l=owner.community("community.create",data={"name":name+" upload test","slug":"upload-test-"+str(uuid.uuid4()),"policy":{"scope":"Disposable synthetic integration corpus only."}})
+                fixtures.append((owner,l,root));assert l["visibility"]=="private" and "mode" not in l["policy"]
+                owner.community("connect",community=l["id"],alias="fixture")
+                fid=str(uuid.uuid4());marker=provider+"uniquemarker"
+                source=root/".re-discipline/docs/clock.md";source.write_text(finding(fid,marker))
+                uploaded=owner.community("knowledge.upload",alias="fixture");assert uploaded["complete"] and uploaded["uploaded"]==1,uploaded
+                unchanged=owner.community("knowledge.upload",alias="fixture");assert unchanged["uploaded"]==0 and unchanged["unchanged"]==1,unchanged
+                source.write_text(finding(fid,marker,"corrected"))
+                updated=owner.community("knowledge.upload",alias="fixture");assert updated["complete"] and updated["uploaded"]==1,updated
+                doc=owner.community("knowledge.get",alias="fixture",data={"id":fid})
+                assert "corrected" in doc["markdown"] and "PRIVATE_SMOKE_RESEARCH" not in doc["markdown"]
+                assert "PRIVATE_SMOKE_RESEARCH" in source.read_text()
+                deadline=time.monotonic()+30
+                while True:
+                    result=owner.community("query",alias="fixture",data={"query":marker})
+                    if result["hits"] and result["hits"][0]["fingerprint"]==doc["fingerprint"]:break
+                    assert time.monotonic()<deadline,result
+                    time.sleep(.2)
+                assert not result.get("warnings"),result
+                combined=owner.tool("query",{"root":str(root),"query":marker,"sources":"both","assistance":"off"})
+                assert len(combined["hits"])==1,combined
+                merged=combined["hits"][0]
+                assert merged["source"]=="local" and merged["finding_id"]==fid and merged["fingerprint"]==doc["fingerprint"],merged
+                assert len(merged["locations"])==2 and not merged.get("content_differs"),merged
+                assert {v["source"] for v in merged["locations"]}=={"local","fixture"},merged
+                # A local correction replaces the stale remote candidate before ranking.
+                source.write_text(finding(fid,marker,"local edit"))
+                divergent=owner.tool("query",{"root":str(root),"query":marker,"sources":"both","assistance":"off"})
+                assert len(divergent["hits"])==1,divergent
+                assert divergent["hits"][0]["source"]=="local" and divergent["hits"][0]["resolution"]=="local_changed",divergent
+                assert divergent["hits"][0]["content_differs"] and len(divergent["hits"][0]["other_copies"])==1,divergent
+                source.write_text(finding(fid,marker,"corrected"))
+                # A second operator workspace changes only the community copy.
+                writer_root=base/(provider+"-writer");(writer_root/".re-discipline/docs").mkdir(parents=True)
+                writer=Adapter(provider,writer_root,args.service)
+                writer.community("connect",community=l["id"],alias="fixture")
+                (writer_root/".re-discipline/docs/clock.md").write_text(finding(fid,marker,"remote edit"))
+                remote_upload=writer.community("knowledge.upload",alias="fixture")
+                assert remote_upload["complete"] and remote_upload["uploaded"]==1,remote_upload
+                deadline=time.monotonic()+30
+                while True:
+                    result=owner.tool("query",{"root":str(root),"query":marker,"sources":"both","assistance":"off"})
+                    if result["hits"] and result["hits"][0].get("resolution")=="remote_changed":break
+                    assert time.monotonic()<deadline,result
+                    time.sleep(.2)
+                assert len(result["hits"])==1 and result["hits"][0]["source"]=="fixture",result
+                assert result["hits"][0].get("created_at") and result["hits"][0].get("knowledge_updated_at"),result
+                source.write_text(finding(fid,marker,"local divergence"))
+                result=owner.tool("query",{"root":str(root),"query":marker,"sources":"both","assistance":"off"})
+                assert len(result["hits"])==1 and result["hits"][0]["source"]=="local" and result["hits"][0]["resolution"]=="local_preferred_diverged",result
+                writer.community("disconnect",alias="fixture")
+                reader_root=base/(provider+"-reader");(reader_root/".re-discipline/docs").mkdir(parents=True)
+                reader=Adapter(provider,reader_root,args.service,reader=True)
+                invitation=owner.community("access.create",alias="fixture")
+                try:
+                    reader.community("connect",community=l["id"],alias="fixture",data={"invitation":invitation["invitation"]})
+                    hits=reader.tool("query",{"root":str(reader_root),"query":marker,"sources":"external"})["hits"]
+                    assert len(hits)==1 and hits[0]["community_id"]==l["id"]
+                    denied=reader.community("knowledge.upload",alias="fixture");assert not denied["complete"] and "operator" in denied["issues"][0]
+                    for action in ["knowledge.delete","community.create","access.create"]:
+                        reader.tool("community",{"root":str(reader_root),"action":action,"alias":"fixture","data":{}},error="read-only")
+                    reader.tool("community",{"root":str(reader_root),"action":"publish.prepare","alias":"fixture"},error="retired")
+                finally:
+                    if reader.community("connections")["connections"]:reader.community("disconnect",alias="fixture")
+                report["providers"].append(provider)
+                print(provider+": upload, skip, replacement, evidence stripping, both-mode reconciliation, timestamps, scoped read and reader-write denial passed")
+            for owner,l,root in fixtures:
+                other=next(v for v in fixtures if v[1]["id"]!=l["id"])
+                assert not owner.community("query",alias="fixture",data={"query":other[0].provider+"uniquemarker"})["hits"]
+                owner.tool("community",{"root":str(root),"action":"query","alias":"fixture","community":other[1]["id"],"data":{"query":"fixtureclock"}},error="conflicts")
+            for owner,l,root in fixtures:
+                delete_fixture(owner,l["id"],base/(owner.provider+".zst"))
+                assert (root/".re-discipline/docs/clock.md").exists()
+            fixtures.clear()
+            report["passed"]=True
+        finally:
+            for owner,l,root in fixtures:
+                owner.community("community.delete",community=l["id"],data={"step":"cancel"})
+                delete_fixture(owner,l["id"])
+    if args.report:args.report.write_text(json.dumps(report,indent=2)+"\n")
+    print(json.dumps(report,indent=2))
 
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":main()

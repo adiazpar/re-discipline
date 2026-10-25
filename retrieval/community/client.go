@@ -158,7 +158,7 @@ func (c *Client) Operation(ctx context.Context, action, library string, payload,
 }
 func readOperation(action string) bool {
 	switch action {
-	case "community.get", "query", "finding.get", "finding.history", "finding.match", "finding.relations", "finding.contributions":
+	case "community.get", "query", "knowledge.get":
 		return true
 	}
 	return false

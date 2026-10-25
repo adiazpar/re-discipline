@@ -101,14 +101,16 @@ func queryClaim(ctx context.Context, root string, hit Result, settings Settings,
 	if err != nil {
 		return semantic.Claim{}, err
 	}
-	var changes []Change
-	if err = client.Operation(ctx, "finding.get", conn.CommunityID, map[string]string{"id": hit.FindingID}, &changes); err != nil {
+	var doc KnowledgeDocument
+	if err = client.Operation(ctx, "knowledge.get", conn.CommunityID, map[string]string{"id": hit.FindingID}, &doc); err != nil {
 		return semantic.Claim{}, err
 	}
-	if len(changes) != 1 || changes[0].Revision != hit.Revision || changes[0].Deleted {
+	if doc.ID != hit.FindingID || doc.Fingerprint != hit.Fingerprint {
 		return semantic.Claim{}, fmt.Errorf("remote claim changed during query")
 	}
-	return ProjectClaim(changes[0].Document, changes[0].Status), nil
+	parsed := engine.Parse(doc.Path, doc.Markdown)
+	return ProjectClaim(Document{Markdown: doc.Markdown, SourcePath: doc.Path, Kind: parsed.Kind, Grade: parsed.Grade, Build: parsed.Build}, "active"), nil
+
 }
 
 // Query is the common local/community orchestration path. Identity and validity
@@ -189,8 +191,8 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 				out.Assistance = &status
 				if !offline {
 					// A provider round trip must not freeze access, corrections or
-					// grouping at the pre-inference snapshot. A fresh ordinary query
-					// rechecks every source and nested contribution together.
+					// data at the pre-inference state. A fresh ordinary query
+					// rechecks each source and fingerprint.
 					fresh, e := queryCandidates(ctx, root, q, mode, false, opts)
 					if e != nil {
 						out.Hits = nil
@@ -231,14 +233,6 @@ func sameCandidates(left, right []Result) bool {
 	var strip func(Result) Result
 	strip = func(v Result) Result {
 		v.Relevance = nil
-		v.Contributions = append([]Result{}, v.Contributions...)
-		v.Versions = append([]Result{}, v.Versions...)
-		for i := range v.Contributions {
-			v.Contributions[i] = strip(v.Contributions[i])
-		}
-		for i := range v.Versions {
-			v.Versions[i] = strip(v.Versions[i])
-		}
 		return v
 	}
 	counts := map[string]int{}
@@ -270,108 +264,4 @@ func boundedEach(n int, f func(int)) {
 	}
 	close(jobs)
 	wg.Wait()
-}
-
-type Selection struct {
-	Path       string             `json:"path"`
-	Decision   string             `json:"decision"`
-	Checks     []Check            `json:"checks"`
-	Projection ClaimProjection    `json:"projection"`
-	Judgment   *semantic.Judgment `json:"judgment,omitempty"`
-	Warning    string             `json:"warning,omitempty"`
-}
-
-// SelectPublication performs no submission and sends no document to a community.
-// Optional provider projection follows the separately enabled local setting.
-func SelectPublication(ctx context.Context, root string, conn Connection, paths []string, build string, offline bool) (any, error) {
-	if len(paths) == 0 || len(paths) > 128 {
-		return nil, fmt.Errorf("select 1–128 local paths per selection request")
-	}
-	config, err := semantic.LoadConfig(root)
-	if err != nil {
-		config = semantic.Config{}
-	}
-	client, err := NewConnectionClient(conn, root)
-	if err != nil {
-		return nil, err
-	}
-	var library Library
-	if !offline {
-		if err = client.Operation(ctx, "community.get", conn.CommunityID, map[string]any{}, &library); err != nil {
-			return nil, err
-		}
-	}
-	s, err := LoadSettings(root)
-	if err != nil {
-		return nil, err
-	}
-	judge := semantic.New(config, filepath.Join(root, ".re-discipline", "cache", "jev"))
-	items := make([]Selection, len(paths))
-	boundedEach(len(paths), func(i int) {
-		item := Selection{Path: paths[i], Decision: "review", Checks: []Check{}}
-		defer func() { items[i] = item }()
-		d, e := localDocument(root, paths[i])
-		if e != nil {
-			item.Decision = "exclude"
-			item.Warning = e.Error()
-			return
-		}
-		for _, pattern := range s.Exclude {
-			matched, _ := filepath.Match(filepath.FromSlash(pattern), filepath.FromSlash(paths[i]))
-			if matched || strings.HasPrefix(strings.ToLower(paths[i]), strings.TrimSuffix(strings.ToLower(pattern), "/")+"/") {
-				item.Decision = "exclude"
-				item.Warning = "Excluded by local publication settings."
-				return
-			}
-		}
-		if build != "" {
-			d.Build = build
-		}
-		// Validate original privacy markers before removing research sections.
-		for _, check := range Validate(d) {
-			if check.Code == "private_marker" || check.Code == "source_path" || check.Code == "kind" || check.Code == "promotion" {
-				item.Decision = "exclude"
-				item.Checks = append(item.Checks, check)
-				return
-			}
-		}
-		item.Projection = ProjectPublication(d.Markdown)
-		d.Markdown = item.Projection.Markdown
-		d.Evidence = nil
-		item.Checks = Validate(d)
-		for _, check := range item.Checks {
-			if check.Blocking {
-				item.Decision = "clarify"
-				return
-			}
-		}
-		if !semantic.KnownScope(d.Build) {
-			item.Decision = "clarify"
-			item.Warning = "State the applicable build and conditions."
-			return
-		}
-		if item.Projection.NeedsReview {
-			item.Decision = "clarify"
-			item.Warning = "Review the removed research text and retain every applicability condition in the claim before publishing."
-			return
-		}
-		if config.Enabled && !offline {
-			claim := ProjectClaim(d, "promoted")
-			j, e := judge.Evaluate(ctx, root+"/selection/"+conn.Service+"/"+conn.CommunityID, map[string]any{"claim": claim, "policy": library.Policy, "policy_version": library.PolicyVersion}, semantic.SelectionQuestions(), false)
-			if e != nil {
-				item.Warning = e.Error()
-				return
-			}
-			item.Judgment = &j
-			a := j.Answers["selection"]
-			if claim.Truncated || a.Confidence == nil || *a.Confidence < .8 {
-				item.Decision = "clarify"
-			} else {
-				item.Decision = a.Choice
-			}
-		} else {
-			item.Warning = "Review scope against the community policy; optional assistance is unavailable or disabled."
-		}
-	})
-	return map[string]any{"destination": conn, "policy": library.Policy, "items": items, "uploaded": false, "submitted": false}, nil
 }

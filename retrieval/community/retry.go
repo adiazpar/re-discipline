@@ -20,7 +20,7 @@ type readRetryBudget struct {
 // evade capacity controls. Mutations and connection creation are not retried.
 func (c *Client) call(ctx context.Context, path string, payload, out any) error {
 	request, ok := payload.(Request)
-	retryable := ok && readOperation(request.Action)
+	retryable := ok && (readOperation(request.Action) || request.Action == "knowledge.inventory" || request.Action == "knowledge.put")
 	budget, _ := ctx.Value(retryBudgetKey{}).(*readRetryBudget)
 	if budget == nil {
 		budget = &readRetryBudget{}
@@ -30,10 +30,14 @@ func (c *Client) call(ctx context.Context, path string, payload, out any) error 
 	for {
 		err := c.callOnce(ctx, path, payload, out)
 		var api *APIError
-		if err == nil || !retryable || budget.retries >= 2 || !errors.As(err, &api) || (api.Status != 429 && api.Status != 503) {
+		if err == nil || !retryable || budget.retries >= 2 || (errors.As(err, &api) && api.Status != 429 && api.Status != 503) || (api == nil && request.Action != "knowledge.put") {
 			return err
 		}
-		delay, valid := retryDelay(api.RetryAfter, budget.retries, time.Now())
+		header := ""
+		if api != nil {
+			header = api.RetryAfter
+		}
+		delay, valid := retryDelay(header, budget.retries, time.Now())
 		if !valid || budget.waited+delay > 5*time.Second {
 			return err
 		}

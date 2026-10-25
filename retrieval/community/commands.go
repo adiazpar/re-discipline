@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,8 +19,6 @@ type Command struct {
 	Community string          `json:"community,omitempty"`
 	Alias     string          `json:"alias,omitempty"`
 	Path      string          `json:"path,omitempty"`
-	Build     string          `json:"build,omitempty"`
-	DraftID   string          `json:"draft_id,omitempty"`
 	Mode      string          `json:"mode,omitempty"`
 	Data      json.RawMessage `json:"data,omitempty"`
 }
@@ -42,16 +39,6 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return nil, err
 	}
 	switch p.Action {
-	case "sync", "changes", "export", "login.start", "login.finish", "logout", "dashboard", "member.list", "member.set", "member.remove", "invite.create", "invite.list", "invite.revoke", "invite.redeem", "token.list", "token.revoke":
-		return nil, fmt.Errorf("operation retired: communities provide remote search and operator-managed read connections")
-	}
-	if p.Action == "publish.export" {
-		p.Action = "publish.batch.export"
-	}
-	if p.Action == "publish.queue" && p.DraftID == "" {
-		p.Action = "publish.batch.queue"
-	}
-	switch p.Action {
 	case "status", "assistance.status":
 		return AssistanceInfo(root)
 	case "assistance.set":
@@ -67,27 +54,6 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 			return nil, err
 		}
 		return AssistanceInfo(root)
-	case "source.set":
-		var v struct {
-			Namespace string `json:"namespace"`
-		}
-		if err := json.Unmarshal(p.Data, &v); err != nil {
-			return nil, err
-		}
-		if len(v.Namespace) > 200 || strings.TrimSpace(v.Namespace) != v.Namespace || strings.ContainsAny(v.Namespace, "\r\n") {
-			return nil, fmt.Errorf("use a portable source project label of at most 200 characters")
-		}
-		s, err := LoadSettings(root)
-		if err != nil {
-			return nil, err
-		}
-		for i := range s.Connections {
-			if s.Connections[i].Alias == p.Alias {
-				s.Connections[i].SourceNamespace = v.Namespace
-				return s, SaveSettings(root, s)
-			}
-		}
-		return nil, fmt.Errorf("unknown connection alias")
 	case "connections":
 		return LoadSettings(root)
 	case "retrieval.set":
@@ -107,115 +73,20 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		}
 		s.Mode = p.Mode
 		return s, SaveSettings(root, s)
-	case "publish.preview":
-		return ReadDraft(root, p.DraftID)
-	case "publish.revise":
-		return Revise(ctx, root, p.DraftID)
-	case "publish.queue":
-		return Queue(root, p.DraftID)
-	case "publish.flush":
-		return FlushBatch(ctx, root, p.Alias, "")
-	case "publish.batch.flush":
-		var v struct {
-			ImportGrant string `json:"import_grant"`
+	case "knowledge.identify":
+		var options UploadOptions
+		if err := json.Unmarshal(p.Data, &options); err != nil {
+			return nil, err
 		}
-		if len(p.Data) > 0 {
-			if e := json.Unmarshal(p.Data, &v); e != nil {
-				return nil, e
-			}
-		}
-		if v.ImportGrant != "" && p.Alias == "" {
-			return nil, fmt.Errorf("an import allowance requires one explicit alias")
-		}
-		return FlushBatch(ctx, root, p.Alias, v.ImportGrant)
-	case "publish.batch.queue", "publish.batch.export":
-		var v struct {
-			DraftIDs []string `json:"draft_ids"`
-		}
-		if e := json.Unmarshal(p.Data, &v); e != nil {
-			return nil, e
-		}
-		if len(v.DraftIDs) == 0 || len(v.DraftIDs) > 20000 {
-			return nil, fmt.Errorf("select 1 to 20000 draft IDs")
-		}
-		items := []BatchItem{}
-		issues := []map[string]string{}
-		destination := ""
-		for _, id := range v.DraftIDs {
-			d, e := ReadDraft(root, id)
-			if e == nil && p.Alias != "" && d.Connection.Alias != p.Alias {
-				e = fmt.Errorf("draft belongs to another destination")
-			}
-			if e == nil && p.Action == "publish.batch.queue" {
-				d, e = Queue(root, id)
-			}
-			if e != nil {
-				issues = append(issues, map[string]string{"draft_id": id, "error": e.Error()})
-				continue
-			}
-			key := d.Connection.Service + "/" + d.Connection.CommunityID
-			if destination != "" && destination != key {
-				return nil, fmt.Errorf("export one community at a time")
-			}
-			destination = key
-			if p.Action == "publish.batch.export" {
-				if d.State != "queued" {
-					issues = append(issues, map[string]string{"draft_id": id, "error": "preview and queue this draft before export"})
-					continue
-				}
-				items = append(items, BatchItem{Key: submissionKey(d), Document: d.Document})
-			}
-		}
-		return map[string]any{"items": items, "issues": issues, "destination": destination}, nil
-	case "publish.evidence":
-		var v struct {
-			Path  string `json:"path"`
-			Label string `json:"label"`
-			Start int    `json:"start"`
-			End   int    `json:"end"`
-		}
-		if e := json.Unmarshal(p.Data, &v); e != nil {
-			return nil, e
-		}
-		return AttachEvidence(root, p.DraftID, v.Path, v.Label, v.Start, v.End)
-	case "publish.list":
-		paths, e := filepath.Glob(filepath.Join(root, ".re-discipline", "community", "drafts", "*.json"))
-		if e != nil {
-			return nil, e
-		}
-		out := []Draft{}
-		for _, path := range paths {
-			d, e := ReadDraft(root, strings.TrimSuffix(filepath.Base(path), ".json"))
-			if e != nil {
-				return nil, e
-			}
-			out = append(out, d)
-		}
-		return out, nil
-	case "publish.update":
-		d, e := ReadDraft(root, p.DraftID)
-		if e != nil {
-			return nil, e
-		}
-		if d.State != "draft" {
-			return nil, fmt.Errorf("only an unqueued draft can be edited; prepare a new draft for a new submission")
-		}
-		var doc Document
-		if e = json.Unmarshal(p.Data, &doc); e != nil {
-			return nil, e
-		}
-		d.Document = doc
-		if d.Projection != nil {
-			d.Projection.NeedsReview = false
-		}
-		return map[string]any{"draft": d, "checks": Validate(doc)}, atomicJSON(draftPath(root, d.ID), d)
+		return IdentifyKnowledge(root, options.Paths)
 	}
+
 	settings, err := LoadSettings(root)
 	if err != nil {
 		return nil, err
 	}
 	var conn Connection
-	if p.Alias == "" && readOperation(p.Action) {
+	if p.Alias == "" && (readOperation(p.Action) || p.Action == "knowledge.upload" || p.Action == "knowledge.status") {
 		if len(settings.Connections) > 1 {
 			return nil, fmt.Errorf("disconnect extra legacy links before retrieval")
 		}
@@ -251,7 +122,7 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		return Ping(ctx, p.Service)
 	}
 	client, err := NewClient(p.Service)
-	if conn.Service != "" && p.Action != "connect" && p.Action != "community.delete" && p.Action != "community.archive" {
+	if err == nil && conn.Service != "" && p.Action != "connect" && p.Action != "community.delete" && p.Action != "community.archive" && (readOperation(p.Action) || client.Token == "") {
 		client, err = NewConnectionClient(conn, root)
 	}
 	if err != nil {
@@ -291,30 +162,23 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 			}
 		}
 		return out, nil
-	case "publish.batch.prepare":
+	case "knowledge.upload", "knowledge.status":
 		if conn.Alias == "" {
-			return nil, fmt.Errorf("publication requires a connected alias")
+			return nil, fmt.Errorf("upload requires the project's connected community")
 		}
-		var v struct {
-			Paths []string `json:"paths"`
-		}
-		if e := json.Unmarshal(p.Data, &v); e != nil {
-			return nil, e
-		}
-		return PrepareBatch(root, conn, v.Paths, p.Build)
-	case "publish.reconcile":
-		if conn.Alias == "" {
-			return nil, fmt.Errorf("reconciliation requires a connected alias")
-		}
-		var v struct {
-			Sources []Adoption `json:"sources"`
-		}
+		var options UploadOptions
 		if len(p.Data) > 0 {
-			if e := json.Unmarshal(p.Data, &v); e != nil {
-				return nil, e
+			if err := json.Unmarshal(p.Data, &options); err != nil {
+				return nil, err
 			}
 		}
-		return Reconcile(root, conn, v.Sources)
+		report, err := UploadKnowledge(ctx, root, conn, options, p.Action == "knowledge.upload")
+		if err != nil {
+			report.issue(err.Error())
+			return report, nil
+		}
+		return report, nil
+
 	case "connect":
 		var credentials struct {
 			Invitation string `json:"invitation"`
@@ -326,24 +190,12 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		}
 		client.Invitation = credentials.Invitation
 		return client.Connect(ctx, root, p.Alias, p.Community)
-	case "publish.prepare":
-		if conn.Alias == "" {
-			return nil, fmt.Errorf("publication requires a connected alias")
-		}
-		if len(p.Data) > 0 {
-			var v struct {
-				Paths   []string `json:"paths"`
-				Offline bool     `json:"offline"`
-			}
-			if err := json.Unmarshal(p.Data, &v); err != nil {
-				return nil, err
-			}
-			if len(v.Paths) > 0 {
-				return PrepareSelected(ctx, root, conn, v.Paths, p.Build, v.Offline)
-			}
-		}
-		return PrepareSelected(ctx, root, conn, []string{p.Path}, p.Build, false)
 	default:
+		switch p.Action {
+		case "community.create", "community.list", "community.get", "community.update", "server.stats", "access.create", "access.list", "access.revoke", "knowledge.get", "knowledge.delete", "query", "usage", "audit.list":
+		default:
+			return nil, fmt.Errorf("unknown or retired operation; readers search and read; only the server operator manages knowledge")
+		}
 		var out any
 		var payload any = map[string]any{}
 		if len(p.Data) > 0 {
@@ -372,9 +224,9 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
 		"root":      map[string]any{"type": "string", "description": "Absolute active project root; use it when calling through a plugin."},
-		"action":    map[string]any{"type": "string", "description": "server.ping (read-only service/database health; no login), status, assistance.status/set, connections, connect, disconnect, source.set, mode.set, retrieval.set, publish.prepare/preview/update/revise/queue/flush/export/list/reconcile, community.create/list/get/update/delete (delete defaults to a preview; separate lock and final confirm steps require explicit human responses; operator only), community.archive (operator-only resumable knowledge archive download to path; never deletes), server.stats (operator only), access.create/list/revoke (single-use invitations, connection status and revocation), publication.resolve/receipts, submission.create/list/get/packet/review/resolve, health.list/review, finding.get/history/withdraw/candidates/relations/relate/match/assess/consolidate/contributions, query, usage, audit.list"},
+		"action":    map[string]any{"type": "string", "enum": []string{"server.ping", "status", "assistance.status", "assistance.set", "connections", "connect", "disconnect", "mode.set", "retrieval.set", "knowledge.identify", "knowledge.status", "knowledge.upload", "knowledge.get", "knowledge.delete", "community.create", "community.list", "community.get", "community.update", "community.delete", "community.archive", "server.stats", "access.create", "access.list", "access.revoke", "query", "usage", "audit.list"}, "description": "Readers connect, search and read one community. Only the server operator manages content or communities. knowledge.identify maintains local finding IDs and curation timestamps after edits. knowledge.upload replaces changed files automatically. community.delete requires separate human confirmation for locking and final deletion."},
 		"retrieval": map[string]any{"type": "string", "enum": []string{"remote"}, "description": "Community retrieval is remote-only. No corpus download or offline cache."},
-		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Explicit docs/ Markdown finding for local publication preparation"}, "build": map[string]any{"type": "string"}, "draft_id": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; each project links one community. See the community skill reference."}}, "required": []string{"action"}}
+		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Local output archive path"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; each project links one community. See the community skill reference."}}, "required": []string{"action"}}
 }
 
 func ReadCommandFile(path string) ([]byte, error) {

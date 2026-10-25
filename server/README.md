@@ -38,12 +38,14 @@ helper does not provision remote hosts or certificates.
 The legacy `serve-local` command remains an owner-only loopback compatibility mode;
 new installations use `serve`. The production handler exposes only health and
 `POST /v1/operations`. Legacy OAuth, browser dashboard, membership-role and corpus
-export routes are not mounted. Ingestion core tests retain an internal legacy
-handler to test unchanged review behavior independently of the new boundary.
+export routes are removed. There is no internal legacy publishing handler.
+Schema upgrades preserve current live knowledge UUIDs, then remove historical
+bodies, submissions, review queues and membership-role tables. Active deletion
+sessions are safely cancelled during this format migration; start a new preview.
 
 ## Permissions and traffic
 
-Only the operator can create or change communities and submit documents. Public
+Only the operator can create or change communities and upload documents. Public
 `community.connect` registers a project's public key; private joining consumes a
 single-use invitation from `access.create`. Each project links one community.
 Client private keys stay in the OS credential store. Signed HTTPS requests bind
@@ -84,6 +86,21 @@ rejections. Budgets are resolved at startup; restart after resizing the host.
 See [scheduling and resource allocation](docs/search-scheduling.md) for the
 algorithm, edge cases, tuning and agent search/read flow. One process owns each
 CACHE_DIR; replicas must have separate caches and scheduling budgets.
+
+## Upload storage and indexing
+
+The owner calls one `knowledge.upload` operation. The client compares paginated
+hash inventories, sends bounded batches, and replaces changed current documents
+by stable UUID. Retried accepted batches return their original receipt without
+rewriting content. Receipts contain no document bodies and expire after 24 hours.
+No history, review or contribution pipeline runs. PostgreSQL is the source of
+truth; each community's SQLite index contains matching search entries and text.
+The worker processes 32 documents per turn, rotating between communities.
+
+Uploads have a separate CPU/RAM-sized queue, bounded pending bytes, and back off
+when readers are queued. Limits protect memory independently of KB size. Storage
+limits are explicit operator settings, not daily upload quotas. See
+[upload contract](../skills/community/references/upload.md).
 
 ## Development and load tests
 

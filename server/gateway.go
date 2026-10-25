@@ -33,9 +33,6 @@ func ValidateOperator(c Config) error {
 // Handler is the operator-owned, remote-only search surface. Legacy account,
 // membership, browser and synchronization routes are deliberately not mounted.
 func (s *Server) Handler() http.Handler {
-	if s.Config.SetupOnly || s.Config.LocalOnly {
-		return s.legacyHandler()
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -50,11 +47,19 @@ func (s *Server) Handler() http.Handler {
 				writeError(w, fail(503, "database unavailable"))
 				return
 			}
+			if s.Config.SetupOnly {
+				writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "setup", "community_enabled": false})
+				return
+			}
 			if err := ValidateOperator(s.Config); err != nil {
 				writeError(w, fail(503, "operator is not configured"))
 				return
 			}
 			writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "ready", "community_enabled": true, "remote_only": true})
+			return
+		}
+		if s.Config.SetupOnly {
+			writeError(w, fail(503, "server setup only"))
 			return
 		}
 		if r.Method != "POST" || r.URL.Path != "/v1/operations" {
@@ -189,7 +194,9 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		if req.Action == "server.stats" && p.operator {
-			writeJSON(w, 200, s.scheduler.stats())
+			stats := s.scheduler.stats()
+			stats["uploads"] = s.uploadScheduler.stats()
+			writeJSON(w, 200, stats)
 			return
 		}
 		if req.Community != "" && req.Action != "community.create" {
@@ -252,18 +259,24 @@ func (s *Server) Handler() http.Handler {
 				_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 			}
 		}
-
-		// Preserve the ingestion implementation behind the new authorization boundary.
-		if req.Action == "community.create" {
-			var l kb.Library
-			if err := data(req.Data, &l); err != nil {
+		if req.Action == "knowledge.put" || req.Action == "knowledge.delete" {
+			releaseIngress()
+			release, _, err := s.uploadScheduler.acquire(ctx, req.Community, "operator", len(body))
+			if err != nil {
+				w.Header().Set("Retry-After", "1")
 				writeError(w, err)
 				return
 			}
-			if l.Policy.Mode == "" {
-				l.Policy.Mode = "trusted"
+			defer release()
+			if s.scheduler.stats()["queued"].(int) > 0 {
+				timer := time.NewTimer(100 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 			}
-			req.Data = raw(l)
 		}
 		r = r.WithContext(ctx)
 		r.Body = http.MaxBytesReader(w, ioBody{bytes.NewReader(raw(req))}, 2*1024*1024)
@@ -277,7 +290,7 @@ func (ioBody) Close() error { return nil }
 
 func readerAction(a string) bool {
 	switch a {
-	case "community.get", "query", "finding.get", "finding.history", "finding.match", "finding.relations", "finding.contributions":
+	case "community.get", "query", "knowledge.get":
 		return true
 	}
 	return false
@@ -288,8 +301,7 @@ func operatorAction(a string) bool {
 	}
 	switch a {
 	case "server.stats", "community.create", "community.list", "community.update", "community.delete", "community.archive.chunk", "access.create", "access.list", "access.revoke", "usage", "audit.list",
-		"submission.create", "submission.batch", "submission.list", "submission.get", "submission.packet", "submission.review", "submission.resolve",
-		"publication.resolve", "publication.receipts", "finding.candidates", "finding.assess", "finding.relate", "finding.consolidate", "finding.withdraw", "health.list", "health.review":
+		"knowledge.inventory", "knowledge.put", "knowledge.delete":
 		return true
 	}
 	return false

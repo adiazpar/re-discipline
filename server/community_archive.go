@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	kb "github.com/adiazpar/re-discipline/retrieval/community"
 	ka "github.com/adiazpar/re-discipline/retrieval/knowledgearchive"
-	"github.com/jackc/pgx/v5"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -151,7 +148,7 @@ func (s *Server) buildArchiveChunk(ctx context.Context, owner, cid string, p arc
 		at.Section = 1
 	}
 	chunkRecords := 0
-	for at.Section <= 5 && buf.Len() < 2<<20 && chunkRecords < 64 {
+	for at.Section <= 1 && buf.Len() < 2<<20 && chunkRecords < 64 {
 		kind, query, args, e := archiveQuery(at.Section, at.Key, cid)
 		if e != nil {
 			err = e
@@ -200,7 +197,7 @@ func (s *Server) buildArchiveChunk(ctx context.Context, owner, cid string, p arc
 			at.Key = ""
 		}
 	}
-	done = at.Section > 5
+	done = at.Section > 1
 	if done {
 		appendRecord("end", map[string]any{"records": at.Records, "chain": at.Chain})
 	}
@@ -232,39 +229,11 @@ func (s *Server) buildArchiveChunk(ctx context.Context, owner, cid string, p arc
 }
 
 func archiveQuery(section int, after, cid string) (string, string, []any, error) {
-	// Fetch one projected record at a time, up to a bounded frame budget. In
-	// particular, never generate/drain 64 multi-megabyte records to send only two.
-	// Names below are compile-time allowlists. IDs in cursors never select tables.
-	kinds := []string{"", "finding", "revision", "submission", "review", "relation"}
-	tables := []string{"", "findings", "revisions", "submissions", "reviews", "finding_relations"}
-	if section < 1 || section > 5 {
+	if section != 1 {
 		return "", "", nil, fail(400, "invalid archive section")
 	}
-	kind := kinds[section]
-	pairs := []string{}
-	for _, field := range ka.Fields[kind] {
-		pairs = append(pairs, "'"+field+"',"+pgx.Identifier{field}.Sanitize())
-	}
-	where, order, key := "id>$2::uuid", "id", "id::text"
-	args := []any{cid, after}
 	if after == "" {
-		args[1] = "00000000-0000-0000-0000-000000000000"
-		where = "id >= $2::uuid"
+		after = "00000000-0000-0000-0000-000000000000"
 	}
-	if kind == "relation" {
-		a, b := "00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000"
-		if after != "" {
-			parts := strings.Split(after, ",")
-			if len(parts) != 2 {
-				return "", "", nil, fail(400, "invalid archive cursor")
-			}
-			a, b = parts[0], parts[1]
-		}
-		args = []any{cid, a, b}
-		where = "(source_id,target_id)>($2::uuid,$3::uuid)"
-		order = "source_id,target_id"
-		key = "source_id::text||','||target_id::text"
-	}
-	query := fmt.Sprintf("SELECT %s,jsonb_build_object(%s) FROM community.%s WHERE community_id=$1 AND %s ORDER BY %s LIMIT 1", key, strings.Join(pairs, ","), tables[section], where, order)
-	return kind, query, args, nil
+	return "document", `SELECT id::text,jsonb_build_object('id',id,'path',source_path,'markdown',markdown,'fingerprint',fingerprint) FROM community.documents WHERE community_id=$1 AND id>$2::uuid ORDER BY id LIMIT 1`, []any{cid, after}, nil
 }

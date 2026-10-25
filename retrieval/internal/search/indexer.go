@@ -23,7 +23,7 @@ func IndexPath(root string) string {
 // 4: added the symbols table (exact-name lookup, outside FTS).
 // 5: aliases frontmatter is indexed into the idents column.
 // 6: porter stemming, so "wraps" matches "wrapping".
-const indexFormatVersion = "7" // applicability and indexed text identity for revision-bound assistance
+const indexFormatVersion = "9" // stable finding identity and evidence-free fingerprint for copy grouping
 
 // relationLinkRe matches "- <Label>: ..." bullets inside a Relations
 // section ("- Depends on:", "- Split from:", and future labels alike).
@@ -97,7 +97,8 @@ func BuildIndexFileContext(ctx context.Context, root, dbPath string) ([]Doc, []s
 		// space-joined, for query-time declared-ident matching — distinct
 		// from the docs.idents FTS column, which also carries identifiers
 		// expanded out of the title and body.
-		`CREATE TABLE docmeta(path TEXT PRIMARY KEY, evidence TEXT, idents TEXT, build TEXT, text_digest TEXT)`,
+		`CREATE TABLE docmeta(path TEXT PRIMARY KEY, evidence TEXT, idents TEXT, build TEXT, text_digest TEXT, finding_id TEXT, fingerprint TEXT, status TEXT, kind TEXT, created_at TEXT, knowledge_updated_at TEXT)`,
+		`CREATE INDEX docmeta_finding_id ON docmeta(finding_id)`,
 		`CREATE TABLE indexmeta(key TEXT PRIMARY KEY, value TEXT)`,
 		// Symbols are exact-name records (struct layouts, constants) from
 		// the optional .re-discipline/symbols.jsonl. They deliberately
@@ -123,53 +124,8 @@ func BuildIndexFileContext(ctx context.Context, root, dbPath string) ([]Doc, []s
 		if err := ctx.Err(); err != nil {
 			return nil, warnings, err
 		}
-		indexBody := StripRelationLinks(d.Body)
-		parts := ExpandIdentifiers(d.Title + " " + indexBody)
-		parts = append(parts, d.Tags...)
-		// Declared idents go in both verbatim-lowercased and expanded,
-		// so a declared ai_forceIdle matches queries for ai_forceIdle,
-		// forceIdle, force, and idle.
-		for _, id := range d.Idents {
-			parts = append(parts, strings.ToLower(id))
-		}
-		if len(d.Idents) > 0 {
-			parts = append(parts, ExpandIdentifiers(strings.Join(d.Idents, " "))...)
-		}
-		// Aliases are indexed as ordinary searchable text in the idents
-		// column. They deliberately do NOT enter docmeta.idents: an alias
-		// is a phrasing hint, not a claim of authority over an identifier,
-		// so it must not waive the reference penalty.
-		for _, a := range d.Aliases {
-			parts = append(parts, strings.Fields(strings.ToLower(a))...)
-			parts = append(parts, ExpandIdentifiers(a)...)
-		}
-		idents := strings.Join(parts, " ")
-		if _, err := tx.ExecContext(ctx, `INSERT INTO docs(title, body, idents, path, status, kind, grade) VALUES(?,?,?,?,?,?,?)`,
-			d.Title, indexBody, idents, d.Path, d.Status, d.Kind, d.Grade); err != nil {
-			tx.Rollback()
+		if _, err := insertDocument(ctx, tx, d); err != nil {
 			return nil, warnings, err
-		}
-		{
-			// Each declared ident is stored verbatim-lowercased plus
-			// with :: and _ collapsed, mirroring the two whole-identifier
-			// forms BuildMatch emits, so either spelling of a query
-			// matches. Split segments are deliberately NOT stored: a doc
-			// declaring spawnSingleAI is not the canonical answer for
-			// every query containing "spawn".
-			var declared []string
-			for _, id := range d.Idents {
-				lower := strings.ToLower(id)
-				declared = append(declared, lower)
-				collapsed := strings.ReplaceAll(strings.ReplaceAll(lower, "::", ""), "_", "")
-				if collapsed != lower {
-					declared = append(declared, collapsed)
-				}
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO docmeta(path, evidence, idents, build, text_digest) VALUES(?,?,?,?,?)`,
-				d.Path, strings.Join(d.Evidence, "\n"), strings.Join(declared, " "), d.Build, d.TextDigest); err != nil {
-				tx.Rollback()
-				return nil, warnings, err
-			}
 		}
 	}
 	for _, s := range syms {
@@ -215,4 +171,57 @@ func ReadManifest(dbPath string) (map[string]FileMeta, error) {
 		out[m.Path] = m
 	}
 	return out, rows.Err()
+}
+
+func insertDocument(ctx context.Context, tx *sql.Tx, d Doc) (int64, error) {
+	indexBody := StripRelationLinks(d.Body)
+	parts := ExpandIdentifiers(d.Title + " " + indexBody)
+	parts = append(parts, d.Tags...)
+	// Declared idents go in both verbatim-lowercased and expanded,
+	// so a declared ai_forceIdle matches queries for ai_forceIdle,
+	// forceIdle, force, and idle.
+	for _, id := range d.Idents {
+		parts = append(parts, strings.ToLower(id))
+	}
+	if len(d.Idents) > 0 {
+		parts = append(parts, ExpandIdentifiers(strings.Join(d.Idents, " "))...)
+	}
+	// Aliases are indexed as ordinary searchable text in the idents
+	// column. They deliberately do NOT enter docmeta.idents: an alias
+	// is a phrasing hint, not a claim of authority over an identifier,
+	// so it must not waive the reference penalty.
+	for _, a := range d.Aliases {
+		parts = append(parts, strings.Fields(strings.ToLower(a))...)
+		parts = append(parts, ExpandIdentifiers(a)...)
+	}
+	idents := strings.Join(parts, " ")
+	result, err := tx.ExecContext(ctx, `INSERT INTO docs(title, body, idents, path, status, kind, grade) VALUES(?,?,?,?,?,?,?)`,
+		d.Title, indexBody, idents, d.Path, d.Status, d.Kind, d.Grade)
+	if err != nil {
+		return 0, err
+	}
+	{
+		// Each declared ident is stored verbatim-lowercased plus
+		// with :: and _ collapsed, mirroring the two whole-identifier
+		// forms BuildMatch emits, so either spelling of a query
+		// matches. Split segments are deliberately NOT stored: a doc
+		// declaring spawnSingleAI is not the canonical answer for
+		// every query containing "spawn".
+		var declared []string
+		for _, id := range d.Idents {
+			lower := strings.ToLower(id)
+			declared = append(declared, lower)
+			collapsed := strings.ReplaceAll(strings.ReplaceAll(lower, "::", ""), "_", "")
+			if collapsed != lower {
+				declared = append(declared, collapsed)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO docmeta(path, evidence, idents, build, text_digest, finding_id, fingerprint, status, kind, created_at, knowledge_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			d.Path, strings.Join(d.Evidence, "\n"), strings.Join(declared, " "), d.Build, d.TextDigest, d.FindingID, d.Fingerprint, d.Status, d.Kind, d.CreatedAt, d.KnowledgeUpdatedAt); err != nil {
+			tx.Rollback()
+			return 0, err
+		}
+	}
+	rowID, err := result.LastInsertId()
+	return rowID, err
 }

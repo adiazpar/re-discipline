@@ -10,8 +10,9 @@ CLI examples use `re-search`; on Windows use `re-search.exe`.
 # Close A Campaign
 
 1. **Final promotion sweep** over `active/<slug>/findings/`. For each
-   candidate, skim with the checklist: atomic claim? evidence cited?
-   grade matches evidence? Then:
+   candidate, follow the [curation conventions](../curate/SKILL.md): atomic claim?
+   Knowledge complete without Evidence? evidence cited in Evidence? grade matches
+   evidence? Normalize older candidates to that format during promotion. Then:
    - search `docs/` for duplicates (`re-search query`) and merge instead
      of duplicating;
    - conflicts: higher evidence grade wins, or record both with the

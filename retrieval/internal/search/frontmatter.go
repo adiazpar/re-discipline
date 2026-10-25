@@ -9,19 +9,23 @@ import (
 
 // Doc is one parsed markdown document from .re-discipline/docs/.
 type Doc struct {
-	TextDigest string
-	Build      string // optional explicit applicability for portable publication
-	Path       string // relative to .re-discipline/, forward slashes
-	Title      string
-	Body       string
-	Status     string // promoted | superseded | candidate | ""
-	Kind       string // fact | ops | ""
-	Grade      string // direct | inferred | reported | ""
-	Tags       []string
-	Idents     []string // identifiers this doc declares itself authoritative for
-	Aliases    []string // alternate phrasings a searcher might use; indexed as text, never grants the reference-penalty exemption
-	Evidence   []string // evidence paths; stored for callers, never indexed as text
-	Warning    string   // non-empty when frontmatter was malformed
+	CreatedAt          string
+	KnowledgeUpdatedAt string
+	FindingID          string
+	Fingerprint        string
+	TextDigest         string
+	Build              string // optional explicit applicability for portable publication
+	Path               string // relative to .re-discipline/, forward slashes
+	Title              string
+	Body               string
+	Status             string // promoted | superseded | candidate | ""
+	Kind               string // fact | ops | ""
+	Grade              string // direct | inferred | reported | ""
+	Tags               []string
+	Idents             []string // identifiers this doc declares itself authoritative for
+	Aliases            []string // alternate phrasings a searcher might use; indexed as text, never grants the reference-penalty exemption
+	Evidence           []string // evidence paths; stored for callers, never indexed as text
+	Warning            string   // non-empty when frontmatter was malformed
 }
 
 // ParseDoc parses raw markdown with optional frontmatter. It is lenient:
@@ -65,6 +69,10 @@ func parseFrontmatter(fm string, d *Doc) {
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 		switch key {
+		case "created_at":
+			d.CreatedAt = val
+		case "knowledge_updated_at":
+			d.KnowledgeUpdatedAt = val
 		case "build":
 			d.Build = val
 		case "status":

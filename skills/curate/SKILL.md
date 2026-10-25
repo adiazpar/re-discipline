@@ -22,8 +22,8 @@ moment never comes back.
 - **Distill candidate findings incrementally as you discover them**, not
   as an end-of-run chore. One atomic claim per file in
   `active/<slug>/findings/`, format per `.re-discipline/CONVENTIONS.md`:
-  frontmatter (`status: candidate`, `kind`, `grade`, `evidence` pointing
-  at your report section, `tags`), title = the claim as one sentence.
+  frontmatter (`status: candidate`, `kind`, `grade`, `build`, `tags`),
+  title = the claim as one sentence. Do not put evidence in frontmatter.
 - Write the title as the claim itself, never a label. It is the heaviest
   text in the document — weighted four times the body.
 - Two more frontmatter keys decide whether anyone finds the doc again:
@@ -41,23 +41,53 @@ moment never comes back.
   decompilation/memory; deductions are `inferred`; external docs are
   `reported`. Do not state hypotheses as facts.
 - Negative results are findings too: "X does not work, because Y."
-- Write portable findings at discovery time: identify the build and modifications,
-  state the claim's limits, and include a short `## Supporting evidence` section
-  with the selected observation, signature, or excerpt. Keep full traces and local
-  reproduction setup in the report. Use `build:` frontmatter for applicability;
-  explicitly distinguish unknown build information from measured conditions.
-  A portable document remains local until publication is authorized.
+- Use two body sections, in order: `## Knowledge`, then `## Evidence` as the
+  final section. Put the complete finding in Knowledge: explanation, applicability,
+  relevant modifications, conditions, exceptions and uncertainty. Technical details
+  needed to use the finding belong here too; knowledge is not just a one-line claim.
+  Use `build:` frontmatter for the software identity and distinguish unknown build
+  information from measured conditions. Subsections use `###` or deeper headings.
+- Evidence is the one place for report links (including the report section),
+  selected observations/excerpts, and references to scripts, traces or other
+  supporting artifacts. Keep full traces and reproduction setup in the report.
+  Community upload removes this section from a copy and never follows its links.
+  The title, metadata and Knowledge must therefore stand alone without Evidence.
+  Do not leave a condition or exception only in Evidence. A finding remains local
+  until publication is authorized.
 - Do NOT put findings into `docs/` — promotion is the manager's job.
 
 ## If you are the manager promoting
 
-Skim each candidate (atomic? evidence cited? grade matches evidence?),
+Skim each candidate (atomic? Knowledge complete without Evidence? evidence cited
+in Evidence? grade matches evidence?),
 search `docs/` for duplicates first, reconcile applicability and evidence
-(a higher grade does not erase a contradictory observation), set `status: promoted`, move into `docs/`, run
+(a higher grade does not erase a contradictory observation), set `status: promoted`, move into `docs/`, run `knowledge.identify` on the promoted paths, then
 `.re-discipline/bin/re-search index`. You review claims — you never
-re-derive reports.
+re-derive reports. When promoting an older-format candidate, move evidence metadata
+and supporting material into the final Evidence section, retaining all knowledge
+and qualifications in Knowledge. Preserve the supporting material locally.
 
 ## Correcting promoted docs
 
-Edit the doc, set `status: superseded`, link the replacement doc, cite
-the newer evidence. Git history is the provenance trail.
+Correct the existing finding in place, retaining its UUID and `status: promoted`.
+Replace overturned knowledge and cite the newer support in Evidence. Run
+`knowledge.identify` after the edit, then index. Use `status: superseded` only when
+retiring the entire finding in favor of a distinct one, linking the replacement.
+Git history remains available independently of the plugin.
+
+## Stable finding identity and dates
+
+Every finding has one `id: <UUID>` frontmatter field. After creating, editing or promoting it, call the
+community tool's local-only `knowledge.identify` action with the project root and
+`data:{paths:["docs/example.md"]}` (campaign `active/.../findings/...md` paths also
+work). It assigns a missing ID and maintains `created_at` and `knowledge_updated_at`
+without a server or credential. Preserve IDs when
+editing, promoting or renaming; a distinct new finding must receive a new ID.
+The tool preserves the creation date and advances the knowledge date only when
+publishable knowledge or its metadata changes. Evidence-only edits do not advance
+it. Dates use UTC RFC3339; never manually make a date newer to change retrieval
+priority. Legacy findings get their first recorded date when maintained. Upload
+also maintains these fields. Plain editor changes get their date at the next
+curation/upload action; queries still detect changed content automatically.
+The fingerprint and one last matching remote fingerprint live in the existing
+disposable index, not in frontmatter. No historical document versions are stored.

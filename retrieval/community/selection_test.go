@@ -31,7 +31,7 @@ func TestQuerySelectsCommunitiesBeforeAnyTraffic(t *testing.T) {
 				t.Error("request used another origin's credential")
 			}
 			count.Add(1)
-			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: "fixture", Revision: "1", Title: "Fixture"}}})
+			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: "fixture", Fingerprint: "1", Title: "Fixture"}}})
 		}))
 	}
 	firstToken, secondToken := strings.Repeat("a", 43), strings.Repeat("b", 43)

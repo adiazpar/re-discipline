@@ -8,11 +8,9 @@ import (
 )
 
 type Limits struct {
-	Communities int   `json:"communities_per_owner"`
-	Members     int   `json:"members_per_community"`
-	Submissions int   `json:"submissions_per_user_day"`
+	Communities int   `json:"communities_per_server"`
 	Bytes       int64 `json:"bytes_per_community"`
-	Findings    int   `json:"findings_per_community"`
+	Findings    int   `json:"documents_per_community"`
 }
 
 func setting(name string, defaultValue int) int {
@@ -23,7 +21,7 @@ func setting(name string, defaultValue int) int {
 	return v
 }
 func (s *Server) limits() Limits {
-	return Limits{setting("MAX_OWNED_COMMUNITIES", 5), setting("MAX_COMMUNITY_MEMBERS", 100), setting("MAX_DAILY_SUBMISSIONS", 100), int64(setting("MAX_COMMUNITY_BYTES", 100*1024*1024)), setting("MAX_COMMUNITY_FINDINGS", 20000)}
+	return Limits{setting("MAX_TOTAL_COMMUNITIES", 1000), int64(setting("MAX_COMMUNITY_BYTES", 100<<30)), setting("MAX_COMMUNITY_FINDINGS", 1000000)}
 }
 func (s *Server) consume(ctx context.Context, tx pgx.Tx, user, kind string, limit int) error {
 	var used int
@@ -39,6 +37,6 @@ func (s *Server) consume(ctx context.Context, tx pgx.Tx, user, kind string, limi
 func (s *Server) usage(ctx context.Context, tx pgx.Tx, c string) (any, error) {
 	var bytes int64
 	var findings int
-	err := tx.QueryRow(ctx, `SELECT bytes,findings FROM community.publication_usage($1)`, c).Scan(&bytes, &findings)
-	return map[string]any{"submission_bytes": bytes, "findings": findings, "limits": s.limits()}, err
+	err := tx.QueryRow(ctx, `SELECT knowledge_bytes,knowledge_count FROM community.libraries WHERE id=$1`, c).Scan(&bytes, &findings)
+	return map[string]any{"knowledge_bytes": bytes, "documents": findings, "limits": s.limits()}, err
 }

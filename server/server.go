@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,45 +23,38 @@ import (
 )
 
 type Config struct {
-	OperatorID         string
-	OperatorToken      string
-	SetupOnly          bool
-	LocalOnly          bool
-	LocalOwnerID       string
-	LocalOwnerToken    string
-	JevEnabled         bool
-	PublicURL          string
-	SupabaseURL        string
-	SupabaseKey        string
-	GitHubClientID     string
-	GitHubClientSecret string
-	TrustedProxy       string
-	OpsStatusDir       string
-	WebDir             string
-	CacheDir           string
-	ReviewURL          string
-	ReviewKey          string
+	OperatorID      string
+	OperatorToken   string
+	SetupOnly       bool
+	LocalOnly       bool
+	LocalOwnerID    string
+	LocalOwnerToken string
+	JevEnabled      bool
+	PublicURL       string
+	TrustedProxy    string
+	OpsStatusDir    string
+	CacheDir        string
 }
 
 type Server struct {
-	archiveSlot    chan struct{}
-	archiveNext    time.Time
-	buildSlots     chan struct{}
-	Semantic       *semantic.Client
-	DB             *pgxpool.Pool
-	Config         Config
-	HTTP           *http.Client
-	Authenticate   func(context.Context, string) (string, error)
-	rateMu         sync.Mutex
-	rates          map[string]*rateWindow
-	searchMu       sync.Mutex
-	searchStates   map[string]*searchState
-	scheduler      *searchScheduler
-	metadata       *metadataCache
-	budget         SearchBudget
-	requestSlots   chan struct{}
-	ingressWaiters chan struct{}
-	operatorSlots  chan struct{}
+	indexTurn       int
+	uploadScheduler *searchScheduler
+	archiveSlot     chan struct{}
+	archiveNext     time.Time
+	buildSlots      chan struct{}
+	Semantic        *semantic.Client
+	DB              *pgxpool.Pool
+	Config          Config
+	HTTP            *http.Client
+	rateMu          sync.Mutex
+	rates           map[string]*rateWindow
+	searchMu        sync.Mutex
+	searchStates    map[string]*searchState
+	scheduler       *searchScheduler
+	budget          SearchBudget
+	requestSlots    chan struct{}
+	ingressWaiters  chan struct{}
+	operatorSlots   chan struct{}
 }
 type rateWindow struct {
 	Start time.Time
@@ -76,11 +68,18 @@ type apiError struct {
 func (e *apiError) Error() string       { return e.Message }
 func fail(status int, msg string) error { return &apiError{status, msg} }
 func New(db *pgxpool.Pool, c Config) *Server {
+	if c.LocalOnly {
+		c.OperatorID, c.OperatorToken = c.LocalOwnerID, c.LocalOwnerToken
+	}
 	s := &Server{DB: db, Config: c, HTTP: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, rates: map[string]*rateWindow{}}
 	s.searchStates = make(map[string]*searchState)
 	s.budget = CurrentSearchBudget()
 	s.scheduler = newSearchScheduler(s.budget)
-	s.metadata = newMetadataCache(s.budget.MetadataBytes)
+	writeBudget := s.budget
+	writeBudget.Workers = max(1, min(s.budget.CPUs/2, int(s.budget.Memory/(128*MiB)), 4))
+	writeBudget.Queue = 16
+	writeBudget.QueueBytes = max(8*MiB, s.budget.Memory/16)
+	s.uploadScheduler = newSearchScheduler(writeBudget)
 	s.buildSlots = make(chan struct{}, 1)
 	s.archiveSlot = make(chan struct{}, 1)
 	s.requestSlots = make(chan struct{}, s.budget.Ingress)
@@ -103,104 +102,6 @@ func New(db *pgxpool.Pool, c Config) *Server {
 	return s
 }
 
-// Legacy routes are retained only for ingestion-core regression tests and the
-// old loopback owner mode. The deployed search service uses Handler in gateway.go.
-func (s *Server) legacyHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := checkRecoveryHealth(s.Config.OpsStatusDir, time.Now()); err != nil {
-			writeError(w, fail(503, err.Error()))
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		if err := s.DB.Ping(ctx); err != nil {
-			writeError(w, fail(503, "database unavailable"))
-			return
-		}
-		mode := "ready"
-		if s.Config.SetupOnly {
-			mode = "setup"
-		} else if s.Config.LocalOnly {
-			mode = "local"
-		}
-		writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": mode, "community_enabled": !s.Config.SetupOnly})
-	})
-	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"supabase_url": s.Config.SupabaseURL, "supabase_publishable_key": s.Config.SupabaseKey, "github_auth": s.Config.GitHubClientID != "", "protocol": kb.ProtocolVersion})
-	})
-	if s.Config.GitHubClientID != "" {
-		mux.HandleFunc("GET /v1/auth/github/start", s.githubStart)
-		mux.HandleFunc("GET /v1/auth/github/callback", s.githubCallback)
-		mux.HandleFunc("GET /v1/auth/session", s.browserSession)
-		mux.HandleFunc("POST /v1/auth/logout", s.browserLogout)
-	}
-	mux.HandleFunc("POST /v1/operations", s.operation)
-	mux.HandleFunc("POST /v1/auth/device/start", s.deviceStart)
-	mux.HandleFunc("POST /v1/auth/device/poll", s.devicePoll)
-	mux.HandleFunc("POST /v1/auth/device/approve", s.deviceApprove)
-	if s.Config.WebDir != "" {
-		fs := http.FileServer(http.Dir(s.Config.WebDir))
-		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			p := filepath.Join(s.Config.WebDir, filepath.Clean("/"+r.URL.Path))
-			if st, err := os.Stat(p); err == nil && !st.IsDir() {
-				fs.ServeHTTP(w, r)
-				return
-			}
-			http.ServeFile(w, r, filepath.Join(s.Config.WebDir, "index.html"))
-		})
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("X-Frame-Options", "DENY")
-		if s.Config.SetupOnly && r.URL.Path != "/healthz" {
-			w.Header().Set("Cache-Control", "no-store")
-			writeError(w, fail(503, "server setup only: community access is not enabled"))
-			return
-		}
-		if s.Config.LocalOnly && r.URL.Path != "/healthz" {
-			w.Header().Set("Cache-Control", "no-store")
-			if r.URL.Path != "/v1/operations" {
-				writeError(w, fail(404, "local owner mode exposes community operations only"))
-				return
-			}
-			if origin := r.Header.Get("Origin"); origin != "" && origin != s.Config.PublicURL {
-				writeError(w, fail(403, "browser request origin does not match this service"))
-				return
-			}
-		}
-		if strings.HasPrefix(r.URL.Path, "/v1/") {
-			w.Header().Set("Cache-Control", "no-store")
-		}
-		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" && r.Header.Get("Authorization") == "" {
-			if _, err := r.Cookie(s.cookieName("session")); err == nil && r.Header.Get("Origin") != s.Config.PublicURL {
-				writeError(w, fail(403, "browser request origin does not match this service"))
-				return
-			}
-		}
-		if !s.allow(r) {
-			writeError(w, fail(429, "request limit reached; retry in one minute"))
-			return
-		}
-		defer func() {
-			if rec := recover(); rec != nil {
-				slog.Error("request panic", "error", rec)
-				writeError(w, fail(500, "internal error"))
-			}
-		}()
-		mux.ServeHTTP(w, r)
-	})
-}
-func (s *Server) allow(r *http.Request) bool {
-	limit := setting("MAX_REQUESTS_PER_IP_MINUTE", 6000)
-	namespace := "legacy/"
-	if strings.HasPrefix(r.URL.Path, "/v1/auth/") {
-		namespace += "auth/"
-		limit = 60
-	}
-	return s.allowIP(r, namespace, limit)
-}
 func (s *Server) allowUntrusted(r *http.Request) bool {
 	return s.allowIP(r, "untrusted/", setting("MAX_UNAUTHENTICATED_REQUESTS_PER_IP_MINUTE", 600))
 }
@@ -321,100 +222,34 @@ func (s *Server) begin(ctx context.Context, user string) (pgx.Tx, error) {
 	return tx, nil
 }
 func (s *Server) operation(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
 	var req kb.Request
 	if err := decode(r.Body, &req); err != nil {
 		writeError(w, err)
 		return
 	}
-	user, err := s.identity(r)
+	p, ok := r.Context().Value(principalKey{}).(principal)
+	if !ok {
+		writeError(w, fail(401, "verified operator or reader required"))
+		return
+	}
+	ctx := r.Context()
+	tx, err := s.begin(ctx, p.userID)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if s.Config.LocalOnly && !localOperation(req.Action) {
-		writeError(w, fail(403, "operation is not enabled in local owner mode"))
-		return
-	}
-	if req.Community == "" {
-		switch req.Action {
-		case "community.create", "community.list", "invite.redeem", "token.list", "token.revoke":
-		default:
-			writeError(w, fail(400, "select a community UUID or slug for this operation"))
-			return
-		}
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	var result any
-	// One public route accepts one or many prepared items. The legacy batch name
-	// remains wire-compatible; chunking never becomes a publication mode.
-	if req.Action == "submission.create" {
-		var shape map[string]json.RawMessage
-		if e := json.Unmarshal(req.Data, &shape); e == nil && shape["items"] != nil {
-			req.Action = "submission.batch"
-		}
-	}
-	switch req.Action {
-	case "submission.batch":
-		result, err = s.submitBatch(ctx, user, req.Community, req.Data)
-	case "invite.redeem":
-		result, err = s.redeem(ctx, user, req.Data)
-	case "token.list", "token.revoke":
-		result, err = s.tokens(ctx, user, req)
-	default:
-		tx, e := s.begin(ctx, user)
-		if e != nil {
-			writeError(w, e)
-			return
-		}
-		defer tx.Rollback(ctx)
-		// Cache invalidation must use the resolved ID even when the request used
-		// a slug. Resolve under the same permissions as the mutation.
-		if req.Action == "finding.withdraw" {
-			l, e := library(ctx, tx, req.Community)
-			if e != nil {
-				writeError(w, e)
-				return
-			}
-			req.Community = l.ID
-			release, lockErr := s.lockIndex(ctx, l.ID, true)
-			if lockErr != nil {
-				writeError(w, lockErr)
-				return
-			}
-			defer release()
-		}
-		result, err = s.dispatch(ctx, tx, user, req)
-		if err == nil {
-			err = tx.Commit(ctx)
-		}
-	}
-	if err != nil {
-		if cause := context.Cause(ctx); cause == errCommunityDeleted || cause == errCommunityLocked {
-			err = cause
-		}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='3s'`); err != nil {
 		writeError(w, err)
 		return
 	}
-	if req.Action == "member.list" {
-		if err = s.addMemberLogins(ctx, result.([]map[string]string)); err != nil {
-			writeError(w, err)
-			return
-		}
+	result, err := s.dispatch(ctx, tx, p.userID, req)
+	if err == nil {
+		err = tx.Commit(ctx)
 	}
-
-	if req.Action == "finding.withdraw" {
-		if err = validUUID(req.Community); err == nil {
-			err = os.RemoveAll(filepath.Join(s.Config.CacheDir, req.Community))
-		}
-		if err == nil && s.Semantic != nil {
-			err = s.Semantic.Purge(ctx)
-		}
-		if err != nil {
-			writeError(w, err)
-			return
-		}
+	if err != nil {
+		writeError(w, err)
+		return
 	}
 	if cause := context.Cause(ctx); cause == errCommunityDeleted || cause == errCommunityLocked {
 		writeError(w, cause)
@@ -465,18 +300,6 @@ func library(ctx context.Context, tx pgx.Tx, c string) (kb.Library, error) {
 		}
 	}
 	return l, err
-}
-func readSubmission(ctx context.Context, tx pgx.Tx, c, sid string) (kb.Submission, error) {
-	var v kb.Submission
-	var d, ch []byte
-	var created time.Time
-	err := tx.QueryRow(ctx, `SELECT id::text,community_id::text,author_id::text,state,digest,document,checks,policy_version,created_at,finding_id,accepted_revision,base_revision,identity_review,resolution_version,contribution_target,contribution_revision FROM community.submissions WHERE community_id=$1 AND id=$2`, c, sid).Scan(&v.ID, &v.CommunityID, &v.Author, &v.State, &v.Digest, &d, &ch, &v.PolicyVersion, &created, &v.FindingID, &v.Revision, &v.BaseRevision, &v.IdentityReview, &v.ResolutionVersion, &v.ContributionTarget, &v.ContributionRevision)
-	if err == nil {
-		err = json.Unmarshal(d, &v.Document)
-		json.Unmarshal(ch, &v.Checks)
-		v.CreatedAt = created.UTC().Format(time.RFC3339)
-	}
-	return v, err
 }
 func validUUID(v string) error {
 	if _, err := uuid.Parse(v); err != nil {

@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--state-dir', type=Path, default=Path.home() / '.re-discipline/servers/local')
     parser.add_argument('--users', type=int, default=1000)
     parser.add_argument('--documents', type=int, default=2000, help='Documents per community')
-    parser.add_argument('--archive-mib', type=int, default=256, help='Synthetic evidence MiB for concurrent archive test')
+    parser.add_argument('--anchors', type=int, default=1, help='Distinct queried documents per community (1–50)')
     parser.add_argument('--requests', type=int, default=2000, help='Requests per concurrency phase')
     parser.add_argument('--report', type=Path)
     parser.add_argument('--cpus', type=int, default=2)
@@ -29,8 +29,8 @@ def main():
     args = parser.parse_args()
     if not (4 <= args.users <= 10000 and 1 <= args.documents <= 20000 and 100 <= args.requests <= 20000):
         parser.error('Use 4–10000 users, 1–20000 documents, and 100–20000 requests')
-    if not (1 <= args.archive_mib <= 4096):
-        parser.error('Use 1–4096 archive MiB')
+    if not 1 <= args.anchors <= 50:
+        parser.error('Use 1–50 anchor documents per community')
     if not (1 <= args.cpus <= 16 and 128 <= args.memory <= 8192):
         parser.error('Use 1–16 CPUs and 128–8192 MiB')
     state = args.state_dir.expanduser().resolve()
@@ -43,11 +43,11 @@ def main():
         parser.error('Load tests require a local Docker context')
     subprocess.run(docker + ['build', '--target', 'tests', '--tag', 're-discipline-search-tests', '--file', str(REPO / 'server/Dockerfile'), str(REPO)], check=True)
     env = dict(os.environ)
-    env.update(TEST_DATABASE_URL=(state / '.env.admin').read_text().strip().split('=', 1)[1], RUN_SEARCH_LOAD='1', LOAD_USERS=str(args.users), LOAD_DOCUMENTS=str(args.documents), LOAD_REQUESTS=str(args.requests), LOAD_ARCHIVE_MIB=str(args.archive_mib), GOMEMLIMIT=str(args.memory * 3 // 4) + 'MiB')
+    env.update(TEST_DATABASE_URL=(state / '.env.admin').read_text().strip().split('=', 1)[1], RUN_SEARCH_LOAD='1', LOAD_USERS=str(args.users), LOAD_DOCUMENTS=str(args.documents), LOAD_REQUESTS=str(args.requests), LOAD_ANCHORS=str(args.anchors), GOMEMLIMIT=str(args.memory * 3 // 4) + 'MiB')
     if args.workers:
         env['MAX_ACTIVE_SEARCHES'] = str(args.workers)
     command = docker + ['run', '--rm', '--memory', str(args.memory) + 'm', '--cpus', str(args.cpus), '--network', 're-discipline-' + installation['name'] + '_database']
-    for name in ['TEST_DATABASE_URL', 'RUN_SEARCH_LOAD', 'LOAD_USERS', 'LOAD_DOCUMENTS', 'LOAD_REQUESTS', 'LOAD_ARCHIVE_MIB', 'GOMEMLIMIT'] + (['MAX_ACTIVE_SEARCHES'] if args.workers else []):
+    for name in ['TEST_DATABASE_URL', 'RUN_SEARCH_LOAD', 'LOAD_USERS', 'LOAD_DOCUMENTS', 'LOAD_REQUESTS', 'LOAD_ANCHORS', 'GOMEMLIMIT'] + (['MAX_ACTIVE_SEARCHES'] if args.workers else []):
         command += ['--env', name]
     command += ['re-discipline-search-tests', '/community-tests', '-test.run=^TestRemoteSearchLoad$', '-test.v', '-test.timeout=15m']
     process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

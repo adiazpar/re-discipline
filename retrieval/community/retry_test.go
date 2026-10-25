@@ -29,7 +29,7 @@ func TestBusyReadRetriesAreBoundedAndKeepIdentity(t *testing.T) {
 			after  string
 			want   int
 		}{
-			{"query", 503, "1", 3}, {"finding.get", 429, "0", 3},
+			{"query", 503, "1", 3}, {"knowledge.get", 429, "0", 3},
 			{"query", 503, "60", 1}, {"query", 503, "garbled", 1},
 			{"query", 401, "", 1}, {"query", 403, "", 1}, {"query", 404, "", 1},
 			{"submission.create", 503, "1", 1}, {"community.connect", 503, "1", 1},
@@ -80,7 +80,7 @@ func TestBusyReadCancellationAndRecovery(t *testing.T) {
 				cancel()
 			}
 			var out map[string]string
-			err := c.Operation(ctx, "finding.get", "doom", map[string]string{"id": "shared"}, &out)
+			err := c.Operation(ctx, "knowledge.get", "doom", map[string]string{"id": "shared"}, &out)
 			cancel()
 			if cancelEarly {
 				if !errors.Is(err, context.Canceled) || calls > 1 {
@@ -135,8 +135,6 @@ func TestRemoteQueryRejectsContradictoryCommunityIdentity(t *testing.T) {
 	for _, hit := range []Result{
 		{CommunityID: "godzilla"},
 		{CommunityID: "doom", Locations: []Location{{CommunityID: "godzilla"}}},
-		{CommunityID: "doom", Contributions: []Result{{CommunityID: "godzilla"}}},
-		{CommunityID: "doom", Versions: []Result{{CommunityID: "godzilla"}}},
 	} {
 		h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{hit}})

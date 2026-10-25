@@ -35,12 +35,19 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 		if _, err = tx.Exec(ctx, string(b)); err != nil {
 			return fmt.Errorf("migration %s: %w", f.Name(), err)
 		}
+		if f.Name() == "022_current_knowledge.sql" {
+			if err = migrateKnowledge(ctx, tx); err != nil {
+				return err
+			}
+		}
+		if f.Name() == "024_knowledge_timestamps.sql" {
+			if err = rehashKnowledge(ctx, tx); err != nil {
+				return fmt.Errorf("migrate knowledge fingerprints (finish or cancel any active archive first): %w", err)
+			}
+		}
 		if _, err = tx.Exec(ctx, `INSERT INTO community.schema_migrations(name) VALUES($1)`, f.Name()); err != nil {
 			return err
 		}
-	}
-	if err = fingerprints(ctx, tx); err != nil {
-		return err
 	}
 	return tx.Commit(ctx)
 }

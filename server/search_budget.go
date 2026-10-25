@@ -30,7 +30,6 @@ type SearchBudget struct {
 	Execution     time.Duration `json:"-"`
 	DBConnections int           `json:"database_connections"`
 	Ingress       int           `json:"ingress_capacity"`
-	MetadataBytes int64         `json:"metadata_cache_bytes"`
 }
 
 func baseSearchBudget(cpus int, memory int64) SearchBudget {
@@ -45,7 +44,7 @@ func baseSearchBudget(cpus int, memory int64) SearchBudget {
 	queue := max(1, min(workers*256, int(memory/8/(32*1024)), 4096))
 	return SearchBudget{CPUs: cpus, Memory: memory, Workers: workers, Queue: queue, QueueBytes: memory / 8,
 		QueueWait: 10 * time.Second, QueueWaitMS: 10000, Execution: 10 * time.Second,
-		DBConnections: workers + 8, Ingress: max(32, workers*8), MetadataBytes: min(memory/16, 64*MiB)}
+		DBConnections: workers + 8, Ingress: max(32, workers*8)}
 }
 func CurrentSearchBudget() SearchBudget {
 	b := baseSearchBudget(runtime.GOMAXPROCS(0), debug.SetMemoryLimit(-1))

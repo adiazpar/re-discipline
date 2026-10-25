@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Re-discipline remote community search
-  version: 2.0.0
+  version: 3.0.0
   description: >-
     Operator-owned knowledge bases with community-scoped read-only connections.
     Only the operator creates communities and uploads documents. New communities
@@ -23,11 +23,18 @@ paths:
         selected public community, or consumes a single-use private invitation.
         Reader requests use Ed25519 HTTP Message Signatures; only the operator
         uses a bearer credential. Readers may call
-        community.get, query, finding.get/history/match/relations/contributions
+        community.get, query, knowledge.get
         with the exact connected community UUID. Only the operator may create,
-        update, delete, upload, review, correct, withdraw, list hosted communities or call
+        update, delete, upload, replace or remove knowledge, list hosted communities or call
         access.create/list/revoke or server.stats. Read operations share fair bounded queues. See skills/community/references/operations.md
-        for operation payloads. Retired operations are rejected.
+        for operation payloads. Internal knowledge.inventory pages hashes; knowledge.put
+        accepts owner-only bounded batches of current documents. Same ID with changed
+        fingerprint replaces current content automatically; accepted retries replay
+        a content-free receipt and never overwrite newer content. Retired operations
+        are rejected. Query accepts at most 128 canonical UUIDs in compare_ids;
+        compared entries return ID, fingerprint and sequence from the same scoped
+        index snapshot as hits, including indexed copies that do not match the query.
+        comparison_complete indicates support. Missing IDs are omitted.
         community.delete defaults to a non-destructive prepare step. Lock requires a ticket
         and explicit archive boolean; confirm requires that ticket, confirm:true and
         verified download or explicit archive waiver. The skill must pause for human

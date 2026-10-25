@@ -64,7 +64,6 @@ func (s *Server) finishCommunityDeletion(ctx context.Context, cid string) error 
 	s.cancelCommunityWork(cid)
 	s.scheduler.dropCommunity(cid)
 	root := filepath.Join(s.Config.CacheDir, cid)
-	s.metadata.forgetTree(root)
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}

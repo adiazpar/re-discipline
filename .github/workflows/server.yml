@@ -30,11 +30,19 @@ jobs:
           go-version-file: server/go.mod
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Install the Linux credential service for connection tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus gnome-keyring
       - name: Local server setup and MCP connectivity
         run: |
           python3 scripts/community-local.py up
           python3 scripts/smoke.py --service http://127.0.0.1:7346
-          python3 scripts/community-smoke.py --service http://127.0.0.1:7346
+          # Exercise the real Secret Service backend in an isolated test session.
+          dbus-run-session -- bash -euo pipefail -c '
+            printf %s ci-fixture-only | gnome-keyring-daemon --unlock --components=secrets
+            python3 scripts/community-smoke.py --service http://127.0.0.1:7346
+          '
         working-directory: .
       - name: Stop local server
         if: always()

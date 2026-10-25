@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/adiazpar/re-discipline/retrieval/internal/knowledge"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,6 +16,27 @@ import (
 // persistent failure remove the temp file and report — callers treat this as
 // non-fatal (the existing index keeps serving).
 func SwapIndex(tmpPath, dstPath string) error {
+	// Upload acceleration belongs to the same disposable index, but is not a
+	// search table. Preserve it when a local search rebuild replaces the file.
+	if db, e := sql.Open("sqlite", tmpPath); e == nil {
+		db.SetMaxOpenConns(1)
+		if _, e = os.Stat(dstPath); e == nil {
+			if _, e = db.Exec(`ATTACH DATABASE ? AS previous`, dstPath); e == nil {
+				for table, schema := range knowledge.CacheTables {
+					var exists int
+					if db.QueryRow(`SELECT count(*) FROM previous.sqlite_master WHERE name=?`, table).Scan(&exists) == nil && exists == 1 {
+						if _, e = db.Exec(schema + `; INSERT OR REPLACE INTO ` + table + ` SELECT * FROM previous.` + table); e != nil {
+							db.Close()
+							return fmt.Errorf("preserve local bookkeeping: %w", e)
+						}
+					}
+				}
+				db.Exec(`DETACH DATABASE previous`)
+			}
+		}
+		db.Close()
+	}
+
 	var err error
 	for i := 0; i < 10; i++ {
 		if err = replaceFile(tmpPath, dstPath); err == nil {

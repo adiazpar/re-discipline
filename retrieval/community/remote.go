@@ -23,17 +23,56 @@ func RemoteQuery(ctx context.Context, conn Connection, query string, opts engine
 	if err != nil {
 		return out, err
 	}
-	err = client.Operation(ctx, "query", conn.CommunityID, map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade, "assistance": false}, &out)
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.Status == 400 && strings.Contains(apiErr.Message, `unknown field "assistance"`) {
-		// Older services have no inference option. Retry this read-only query
-		// with their original schema; never retry authentication or server errors.
-		err = client.Operation(ctx, "query", conn.CommunityID, map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade}, &out)
+	payload := map[string]any{"query": query, "limit": opts.Limit, "kind": opts.Kind, "grade": opts.Grade, "assistance": false}
+	if len(opts.CompareIDs) > 0 {
+		payload["compare_ids"] = opts.CompareIDs
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		out = QueryResult{}
+		err = client.Operation(ctx, "query", conn.CommunityID, payload, &out)
+		var api *APIError
+		if !errors.As(err, &api) || api.Status != 400 {
+			break
+		}
+		if strings.Contains(api.Message, `unknown field "compare_ids"`) {
+			delete(payload, "compare_ids")
+			continue
+		}
+		if strings.Contains(api.Message, `unknown field "assistance"`) {
+			delete(payload, "assistance")
+			continue
+		}
+		break
 	}
 	if err != nil {
 		return out, err
 	}
+	if _, ok := payload["compare_ids"]; !ok {
+		out.Compared = nil
+		out.ComparisonComplete = false
+	}
+	requested := map[string]bool{}
+	for _, id := range opts.CompareIDs {
+		requested[id] = true
+	}
+	seen := map[string]KnowledgeEntry{}
+	for _, entry := range out.Compared {
+		if !requested[entry.ID] || seen[entry.ID].ID != "" || !validCopyIdentity(Result{FindingID: entry.ID, Fingerprint: entry.Fingerprint}) || entry.Sequence < 0 {
+			return QueryResult{}, fmt.Errorf("invalid community comparison identity")
+		}
+		seen[entry.ID] = entry
+	}
+	hitIDs := map[string]bool{}
 	for i := range out.Hits {
+		h := out.Hits[i]
+		if h.Sequence < 0 || (h.FindingID != "" && hitIDs[h.FindingID]) {
+			return QueryResult{}, fmt.Errorf("invalid community result identity")
+		}
+		hitIDs[h.FindingID] = true
+		if e, ok := seen[h.FindingID]; ok && (e.Fingerprint != h.Fingerprint || e.Sequence != h.Sequence) {
+			return QueryResult{}, fmt.Errorf("community comparison does not match indexed result")
+		}
+
 		if !resultScopeMatches(out.Hits[i], conn.CommunityID) {
 			return QueryResult{}, fmt.Errorf("community response contains conflicting source identity")
 		}
@@ -53,28 +92,14 @@ func resultScopeMatches(hit Result, cid string) bool {
 			return false
 		}
 	}
-	for _, nested := range hit.Contributions {
-		if !resultScopeMatches(nested, cid) {
-			return false
-		}
-	}
-	for _, nested := range hit.Versions {
-		if !resultScopeMatches(nested, cid) {
-			return false
-		}
-	}
 	return true
 }
 
 func remoteOrigin(hit *Result, conn Connection) {
+	hit.OtherCopies = nil
+	hit.Resolution = ""
+	hit.ContentDiffers = false
 	hit.Source, hit.Service, hit.CommunityID = conn.Alias, conn.Service, conn.CommunityID
 	hit.Path = ""
-	hit.URL = conn.Service + "/communities/" + conn.CommunityID + "/findings/" + hit.FindingID
-	hit.Locations = []Location{{Source: conn.Alias, Service: conn.Service, CommunityID: conn.CommunityID, FindingID: hit.FindingID, Revision: hit.Revision, CanonicalID: hit.CanonicalID, URL: hit.URL}}
-	for i := range hit.Contributions {
-		remoteOrigin(&hit.Contributions[i], conn)
-	}
-	for i := range hit.Versions {
-		remoteOrigin(&hit.Versions[i], conn)
-	}
+	hit.Locations = []Location{{Source: conn.Alias, Service: conn.Service, CommunityID: conn.CommunityID, FindingID: hit.FindingID, Fingerprint: hit.Fingerprint}}
 }

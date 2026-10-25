@@ -3,8 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	kb "github.com/adiazpar/re-discipline/retrieval/community"
@@ -14,11 +15,12 @@ import (
 )
 
 type searchRequest struct {
-	Query      string `json:"query"`
-	Limit      int    `json:"limit"`
-	Kind       string `json:"kind"`
-	Grade      string `json:"grade"`
-	Assistance *bool  `json:"assistance"`
+	CompareIDs []string `json:"compare_ids,omitempty"`
+	Query      string   `json:"query"`
+	Limit      int      `json:"limit"`
+	Kind       string   `json:"kind"`
+	Grade      string   `json:"grade"`
+	Assistance *bool    `json:"assistance"`
 }
 
 func parseSearch(b json.RawMessage) (searchRequest, error) {
@@ -32,6 +34,14 @@ func parseSearch(b json.RawMessage) (searchRequest, error) {
 	if strings.TrimSpace(p.Query) == "" || len(p.Query) > 1000 {
 		return p, fail(400, "query must contain 1 to 1000 characters")
 	}
+	if len(p.CompareIDs) > 128 {
+		return p, fail(400, "at most 128 comparison identities")
+	}
+	for _, id := range p.CompareIDs {
+		if err := validUUID(id); err != nil {
+			return p, err
+		}
+	}
 	if p.Limit <= 0 {
 		p.Limit = 8
 	}
@@ -43,177 +53,88 @@ func (s *Server) query(ctx context.Context, tx pgx.Tx, l kb.Library, b json.RawM
 	if err != nil {
 		return nil, err
 	}
-	limit := p.Limit
-	assisted := s.Semantic != nil && l.Policy.Assistance && (p.Assistance == nil || *p.Assistance)
-	if assisted && p.Limit < 32 {
-		p.Limit = 32
-	}
-	// Readers share an immutable snapshot; only rebuilding/deletion takes the
-	// community's exclusive lock. Different communities never share an index lock.
-	l, root, meta, release, err := s.snapshot(ctx, tx, l, false)
+	root := s.indexRoot(l.ID)
+	release, err := s.lockIndex(ctx, l.ID, false)
 	if err != nil {
 		return nil, err
 	}
-	locked := true
-	defer func() {
-		if locked {
-			release()
-		}
-	}()
-	assisted = s.Semantic != nil && l.Policy.Assistance && (p.Assistance == nil || *p.Assistance)
-	var inventory int64
-	if err = tx.QueryRow(ctx, `SELECT inventory_generation FROM community.libraries WHERE id=$1`, l.ID).Scan(&inventory); err != nil {
-		return nil, err
-	}
-	related, err := s.relations(ctx, tx, "", l, "finding.relations", raw(map[string]any{}))
+	defer release()
+	db, err := engine.ReadRemoteIndex(root)
 	if err != nil {
+		return nil, fail(503, "knowledge index is warming; retry shortly")
+	}
+	defer db.Close()
+	var indexValue string
+	if err = db.QueryRowContext(ctx, `SELECT value FROM remote_progress WHERE key='sequence'`).Scan(&indexValue); err != nil {
+		requestIndexRepair(ctx, root, err)
+		return nil, fail(503, "knowledge index is warming; retry shortly")
+	}
+	indexed, _ := strconv.ParseInt(indexValue, 10, 64)
+
+	var reset int64
+	if err = tx.QueryRow(ctx, `SELECT reset_sequence FROM community.libraries WHERE id=$1`, l.ID).Scan(&reset); err != nil {
 		return nil, err
 	}
-	canonical := map[string]string{}
-	conflicts := map[string][]string{}
-	for _, r := range related.([]kb.Relation) {
-		if r.Kind == "conflicting" && r.Current {
-			conflicts[r.SourceID] = append(conflicts[r.SourceID], "Conflicting evidence: "+r.TargetID+". "+r.Rationale)
-			conflicts[r.TargetID] = append(conflicts[r.TargetID], "Conflicting evidence: "+r.SourceID+". "+r.Rationale)
-		}
-		if r.Kind == "equivalent" && r.Current && meta[r.SourceID] == r.SourceRevision && meta[r.TargetID] == r.TargetRevision {
-			canonical[r.SourceID] = r.TargetID
-		}
+	if indexed < reset {
+		return nil, fail(503, "knowledge index is warming; retry shortly")
 	}
-	opts := engine.Options{Limit: p.Limit + len(canonical), Kind: p.Kind, Grade: p.Grade}
-	// This directory is a complete, immutable sequence snapshot. Rescanning every
-	// exported document for every reader cannot discover a newer server revision.
-	hits, warnings, err := engine.QuerySnapshotContext(ctx, root, p.Query, opts)
-	if err != nil && ctx.Err() == nil {
-		release()
-		locked = false
-		l, root, meta, release, err = s.snapshot(ctx, tx, l, true)
-		if err != nil {
-			return nil, err
-		}
-		locked = true
-		hits, warnings, err = engine.QuerySnapshotContext(ctx, root, p.Query, opts)
-	}
+	hits, warnings, err := engine.QuerySnapshotContext(ctx, root, p.Query, engine.Options{Limit: p.Limit, Kind: p.Kind, Grade: p.Grade})
 	if err != nil {
-		return nil, err
+		requestIndexRepair(ctx, root, err)
+		return nil, fail(503, "knowledge index is rebuilding; retry shortly")
 	}
 	ids := []string{}
 	for _, h := range hits {
-		fid := strings.TrimSuffix(filepath.Base(h.Path), ".md")
-		ids = append(ids, fid)
-		if canonical[fid] != "" {
-			ids = append(ids, canonical[fid])
-		}
+		ids = append(ids, strings.TrimSuffix(filepath.Base(h.Path), ".md"))
 	}
-	records, err := queryRecords(ctx, tx, l.ID, meta, ids)
+	records, err := engine.ReadRemoteRecords(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
 	out := []kb.Result{}
-	seen := map[string]bool{}
-	documents := map[string]kb.Document{}
+	claims := []semantic.Claim{}
+	namespaces := []string{}
 	for _, h := range hits {
 		fid := strings.TrimSuffix(filepath.Base(h.Path), ".md")
-		seen[fid] = true
-		record, ok := records[fid]
-		if !ok {
-			return nil, pgx.ErrNoRows
-		}
-		textDigest, status, reason, doc := record.digest, record.status, record.reason, record.doc
-		documents[fid] = doc
-		alerts := append([]string{}, conflicts[fid]...)
-		linked := record.alerts
-		alerts = append(alerts, linked...)
-		if len(linked) > 0 && status == "active" {
-			status = "disputed"
-		}
-		if status == "disputed" {
-			alerts = append(alerts, "Disputed finding: "+reason)
-		}
-		out = append(out, kb.Result{Build: doc.Build, TextDigest: textDigest, Status: status, Warnings: alerts, FindingID: fid, Revision: meta[fid], CommunityID: l.ID, Title: h.Title, Snippet: h.Snippet, Grade: h.Grade, Kind: h.Kind, CanonicalID: canonical[fid], URL: fmt.Sprintf("%s/communities/%s/findings/%s", strings.TrimRight(s.Config.PublicURL, "/"), l.ID, fid), Locations: []kb.Location{{Service: s.Config.PublicURL, CommunityID: l.ID, FindingID: fid, Revision: meta[fid], CanonicalID: canonical[fid]}}})
+		r := records[fid]
+		parsed := engine.Parse(r.Path, r.Markdown)
+		out = append(out, kb.Result{FindingID: fid, Fingerprint: r.Fingerprint, CommunityID: l.ID, Build: parsed.Build, Status: "active", Title: h.Title, Snippet: h.Snippet, Grade: h.Grade, Kind: h.Kind, TextDigest: parsed.TextDigest, Sequence: r.Generation, CreatedAt: parsed.CreatedAt, KnowledgeUpdatedAt: parsed.KnowledgeUpdatedAt})
+		claims = append(claims, kb.ProjectClaim(kb.Document{Markdown: r.Markdown, SourcePath: r.Path, Build: parsed.Build, Kind: parsed.Kind, Grade: parsed.Grade}, "active"))
+		namespaces = append(namespaces, l.ID+"/search")
 	}
-	// A matching contribution still opens the canonical claim even when the
-	// canonical wording did not match the query. Keep the matching snippet below it.
-	for _, hit := range append([]kb.Result{}, out...) {
-		fid := hit.CanonicalID
-		if fid == "" || seen[fid] {
-			continue
-		}
-		seen[fid] = true
-		record, ok := records[fid]
-		if !ok {
-			return nil, pgx.ErrNoRows
-		}
-		digest, status, reason, d := record.digest, record.status, record.reason, record.doc
-		documents[fid] = d
-		alerts := append([]string{}, conflicts[fid]...)
-		linked := record.alerts
-		alerts = append(alerts, linked...)
-		if len(linked) > 0 && status == "active" {
-			status = "disputed"
-		}
-		if status == "disputed" {
-			alerts = append(alerts, "Disputed finding: "+reason)
-		}
-		parsed := engine.Parse(d.SourcePath, d.Markdown)
-		snippet := []rune(parsed.Body)
-		if len(snippet) > 600 {
-			snippet = snippet[:600]
-		}
-		out = append(out, kb.Result{FindingID: fid, Revision: meta[fid], CommunityID: l.ID, Build: d.Build, Status: status, Warnings: alerts, TextDigest: digest, Title: parsed.Title, Snippet: string(snippet), Grade: d.Grade, Kind: d.Kind, URL: fmt.Sprintf("%s/communities/%s/findings/%s", strings.TrimRight(s.Config.PublicURL, "/"), l.ID, fid), Locations: []kb.Location{{Service: s.Config.PublicURL, CommunityID: l.ID, FindingID: fid, Revision: meta[fid]}}})
+	comparison, err := engine.ReadRemoteCopyStates(ctx, db, p.CompareIDs)
+	if err != nil {
+		return nil, err
 	}
-	out = kb.GroupContributions(out)
+	compared := []kb.KnowledgeEntry{}
+	for _, r := range comparison {
+		compared = append(compared, kb.KnowledgeEntry{ID: r.ID, Fingerprint: r.Fingerprint, Sequence: r.Generation})
+	}
 	release()
-	locked = false
+	release = func() {}
 	status := kb.AssistanceStatus{Mode: "disabled"}
-	if assisted && len(out) > 0 {
-		currentPolicy, e := library(ctx, tx, l.ID)
-		if e != nil {
-			return nil, e
+	if s.Semantic != nil && l.Policy.Assistance && (p.Assistance == nil || *p.Assistance) {
+		out, status = kb.RankClaims(ctx, s.Semantic, p.Query, out, claims, namespaces, false)
+		var allowed bool
+		if err = tx.QueryRow(ctx, `SELECT community.can_read($1) AND deletion_id IS NULL FROM community.libraries WHERE id=$1`, l.ID).Scan(&allowed); err != nil {
+			return nil, err
 		}
-		if currentPolicy.PolicyVersion != l.PolicyVersion {
-			return nil, fail(409, "community policy changed; retry the query")
-		}
-		if s.Semantic.Key() == "" {
-			status.Mode = "fallback"
-			status.Reason = "Optional assistance is unavailable; baseline retained."
-		} else {
-			claims := make([]semantic.Claim, len(out))
-			namespaces := make([]string, len(out))
-			for i, h := range out {
-				claims[i] = kb.ProjectClaim(documents[h.FindingID], h.Status)
-				namespaces[i] = l.ID + "/search"
-			}
-			out, status = kb.RankClaims(ctx, s.Semantic, p.Query, out, claims, namespaces, false)
-			// Recheck authorization, policy and revisions after inference, without
-			// holding the index mutex or database row locks across network work.
-			latest, e := library(ctx, tx, l.ID)
-			if e != nil {
-				return nil, e
-			}
-			if latest.PolicyVersion != l.PolicyVersion {
-				return nil, fail(409, "community policy changed; retry the query")
-			}
-			var currentInventory int64
-			if e = tx.QueryRow(ctx, `SELECT inventory_generation FROM community.libraries WHERE id=$1`, l.ID).Scan(&currentInventory); e != nil {
-				return nil, e
-			}
-			if currentInventory != inventory || latest.Sequence != l.Sequence {
-				return nil, fail(409, "community claims or relationships changed; retry the query")
-			}
-			for _, hit := range out {
-				var current string
-				if e = tx.QueryRow(ctx, `SELECT revision::text FROM community.findings WHERE community_id=$1 AND id=$2 AND NOT deleted`, l.ID, hit.FindingID).Scan(&current); e != nil || current != hit.Revision {
-					return nil, fail(409, "a claim changed; retry the query")
-				}
-			}
+		if !allowed {
+			return nil, fail(404, "resource unavailable")
 		}
 	}
-	if status.Mode == "fallback" {
-		warnings = append(warnings, status.Reason)
+	return map[string]any{"hits": out, "compared": compared, "comparison_complete": true, "indexed_sequence": indexed, "stored_sequence": l.Sequence, "warnings": warnings, "assistance": status}, nil
+}
+
+func requestIndexRepair(ctx context.Context, root string, err error) {
+	if err == nil || ctx.Err() != nil {
+		return
 	}
-	if len(out) > limit {
-		out = out[:limit]
+	message := strings.ToLower(err.Error())
+	for _, cause := range []string{"malformed", "not a database", "no such table"} {
+		if strings.Contains(message, cause) {
+			_ = os.WriteFile(filepath.Join(root, "rebuild.request"), nil, 0600)
+			return
+		}
 	}
-	return map[string]any{"hits": out, "indexed_sequence": l.Sequence, "warnings": warnings, "assistance": status}, nil
 }

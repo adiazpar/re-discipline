@@ -2,11 +2,11 @@
 
 The local agent calls the plugin's MCP tools. The native client sends a scoped
 HTTP operation, not an executable or database connection. `query` runs the shared
-retrieval engine on the server and returns snippets, finding/revision IDs and
-provenance (default eight hits, maximum fifty). `finding.get` reads the selected
+retrieval engine on the server and returns snippets, finding IDs and fingerprints and
+provenance (default eight hits, maximum fifty). `knowledge.get` reads the selected
 full finding from PostgreSQL. Normal research is search, inspect a few sources,
 then ask a narrower question if needed. No corpus synchronization is involved.
-All community reader operations, including document reads and history, enter the
+All community reader operations, including document reads, enter the
 same scheduler. Searches and full-document reads therefore compete fairly instead
 of letting follow-up fetches bypass resource controls.
 
@@ -96,27 +96,33 @@ See [connection keys](connections.md) for scope, revocation and expiry.
 | Credential revoked while waiting | PostgreSQL authorization runs again after admission and denies the operation. |
 | Slow query or client | Execution and response-write deadlines bound slot occupancy; SQLite and PostgreSQL receive cancellation. |
 | Read gets a temporary busy response | The plugin retries at most twice, with positive jitter, Retry-After support and at most five seconds of retry sleep within the caller's deadline. Longer requested waits are returned to the caller. |
-| Missing/corrupt index | One build runs globally; concurrent cold readers reuse the completed generation instead of rebuilding it repeatedly. |
+| Missing/corrupt index | A background worker rebuilds derived data; readers receive retryable 503 until it is ready. |
 
 Work already running is not preempted. A newly active community can wait for a
 running operation to finish or reach its deadline. Default queue and execution
 budgets are ten seconds each. No scheduler can guarantee low latency under an
 arrival rate above sustained capacity; bounded rejection remains necessary.
 Retries preserve the origin, community, credential and payload. They never create
-a connection to evade backpressure and never retry writes. Authorization failures
+a connection to evade backpressure ; idempotent upload batches also retry using their original key and bytes. Authorization failures
 are not busy responses. Public connections may renew after expiry; revoked keys
 cannot self-renew. Private access requires a new invitation after expiry.
 The client rejects explicit contradictory community IDs in search results,
-including nested results and locations, instead of silently relabeling evidence.
+including locations, instead of silently relabeling evidence.
 
 ## Retrieval optimizations and visibility
 
-The shared FTS5/BM25 ranking remains unchanged. Searches cache immutable revision
-maps in a byte-budgeted LRU, validate/query SQLite through one connection, and
-hydrate result documents plus integrity warnings in one database round trip.
-The cache contains no credentials or complete answer responses. Revision changes
-select a different snapshot; metadata replacement and index corruption are checked.
-Cold builds coalesce and honor cancellation between files and SQL operations.
+The shared FTS5/BM25 ranking remains unchanged. Each community has one derived
+SQLite index with exact Markdown and fingerprint beside its search entries.
+A community lock spans search and hydration so results cannot combine text from
+one update with the fingerprint of another. Indexing applies bounded 32-document
+transactions and rotates between communities; it never rebuilds the whole KB for
+each upload. Queries report when stored knowledge is ahead of the index. A cold or
+deleted-content index returns a temporary unavailable response until ready.
+Corrupt/obsolete index schemas are rebuilt from PostgreSQL by the worker.
+
+Owner uploads use a separate fair queue with CPU/RAM-sized workers and a bounded
+pending byte budget. Batches cap both document count and encoded bytes; the worker
+slows indexing when readers are queued. No queued work holds a database connection.
 
 Only the operator may call `server.stats` (with service URL, no community required).
 It reports budgets, active/queued work per community, completions, rejected or

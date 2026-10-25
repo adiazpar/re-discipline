@@ -21,6 +21,11 @@ func TestRemoteQuerySupportsOlderStrictServices(t *testing.T) {
 		var req Request
 		json.NewDecoder(r.Body).Decode(&req)
 		calls++
+		if strings.Contains(string(req.Data), `"compare_ids"`) {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": `json: unknown field "compare_ids"`})
+			return
+		}
 		if strings.Contains(string(req.Data), `"assistance"`) {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]string{"error": `json: unknown field "assistance"`})
@@ -29,8 +34,8 @@ func TestRemoteQuerySupportsOlderStrictServices(t *testing.T) {
 		json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: "one", Title: "Clock"}}})
 	}))
 	defer h.Close()
-	result, err := RemoteQuery(context.Background(), Connection{Service: h.URL, Alias: "older"}, "clock", engine.Options{Limit: 8})
-	if err != nil || calls != 2 || len(result.Hits) != 1 {
+	result, err := RemoteQuery(context.Background(), Connection{Service: h.URL, Alias: "older"}, "clock", engine.Options{Limit: 8, CompareIDs: []string{copyID}})
+	if err != nil || calls != 3 || len(result.Hits) != 1 {
 		t.Fatalf("old service query failed: %+v %v (%d calls)", result, err, calls)
 	}
 }
@@ -53,8 +58,6 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 		switch req.Action {
 		case "community.connect":
 			json.NewEncoder(w).Encode(map[string]any{"community": Library{ID: cid, Slug: "doom", Name: "DOOM"}})
-		case "finding.match":
-			json.NewEncoder(w).Encode([]FindingMatch{})
 		case "query":
 			if code != 200 {
 				w.WriteHeader(code)
@@ -70,7 +73,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 			if req.Community != cid || args.Query != "timescale" || args.Limit < 2 || args.Limit > 128 || args.Kind != "fact" || args.Grade != "direct" {
 				t.Errorf("query payload: %+v %+v", req, args)
 			}
-			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: fid, Revision: rid, Title: "Remote timescale", Snippet: "Remote evidence", Kind: "fact", Grade: "direct", Contributions: []Result{{FindingID: uuid.NewString(), Revision: uuid.NewString(), Title: "Independent observation"}}}}})
+			json.NewEncoder(w).Encode(QueryResult{Hits: []Result{{FindingID: fid, Fingerprint: rid, Title: "Remote timescale", Snippet: "Remote evidence", Kind: "fact", Grade: "direct"}}})
 		default:
 			t.Errorf("unexpected full-library operation %s", req.Action)
 			http.Error(w, "unexpected", 500)
@@ -92,7 +95,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 	if err != nil || len(result.Hits) != 2 {
 		t.Fatalf("combined query: %+v %v", result, err)
 	}
-	if result.Hits[0].Source != "local" || result.Hits[1].Source != "doom" || result.Hits[1].Service != h.URL || result.Hits[1].Contributions[0].Source != "doom" {
+	if result.Hits[0].Source != "local" || result.Hits[1].Source != "doom" || result.Hits[1].Service != h.URL {
 		t.Fatalf("source attribution: %+v", result.Hits)
 	}
 	if _, err = os.Stat(filepath.Join(root, ".re-discipline", "community", "cache")); !os.IsNotExist(err) {
@@ -112,7 +115,7 @@ func TestRemoteConnectQueryAndOfflineNeverSynchronize(t *testing.T) {
 	mu.Lock()
 	before := len(calls)
 	mu.Unlock()
-	if before != 3 {
+	if before != 2 {
 		t.Fatalf("offline/local/sync attempted network access: %d", before)
 	}
 	for _, code := range []int{403, 503} {

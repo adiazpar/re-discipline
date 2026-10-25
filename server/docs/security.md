@@ -1,56 +1,34 @@
 # Security boundaries
 
-The deployed search API accepts one separately provisioned operator credential
-and individually scoped reader credentials. No browser session, GitHub OAuth,
-Supabase token or legacy device token grants access to the production handler.
-The operator alone creates communities and uploads or changes documents. The
-operator UUID is stable and the random credential must remain outside projects,
-logs and reader installations. Local setup creates it automatically.
+Only the configured server operator creates communities, uploads/replaces current
+knowledge, removes it, archives it or controls read access. Readers use one
+community-scoped Ed25519 project key. Public communities allow explicit joining;
+private ones require a single-use invitation. Public does not mean server-wide
+access. No GitHub account, contributor role or bearer reader token is accepted.
 
-Communities start private. Public means anyone may explicitly establish a read
-connection for that community. A public credential does not grant access to any
-other public community. Private read grants are issued by the operator. Tokens
-are stored hashed in PostgreSQL, expire, and can be individually revoked. Their
-plaintext is returned once for private grants and stored in the client's OS
-credential store. Public connections are issued automatically. Switching public
-to private removes public grants; explicit private grants remain in effect.
-Revoking a public token does not ban a person from reconnecting to an open public
-community. Use private visibility to restrict who may connect.
-These are bearer connection credentials, not verified people. The current API
-does not enforce one account or connection per human. Account identity and
-invitation redemption are a separate design stage; a private grant currently
-means an operator-issued secret, not a single-use invitation.
+Private keys stay in the client's OS credential store. PostgreSQL stores public
+keys, leases, replay nonces and hashed invitation secrets. A stolen database alone
+cannot sign as a reader. A compromised running server can expose hosted plaintext
+knowledge or alter its behavior; HTTPS and public keys do not protect against the
+operator's machine being fully compromised. Revoked keys retain bounded denial
+records. See [connection lifecycle](connections.md) for expiry and renewal.
 
-Every request checks its credential and action before the ingestion/query core.
-Readers can only request metadata and selected findings from their exact community.
-Creation, mutation, bulk corpus export, sync, membership administration and
-server-wide listing are unavailable to reader credentials. PostgreSQL RLS also
-checks reader token scope, expiry, revocation and visibility. Malformed or expired
-credentials fail closed. Changing a local project alias grants no authority.
+The API allowlist and PostgreSQL RLS both enforce read scope and deny reader
+writes. Queued readers are reauthorized on admission. Operator ingress remains
+available separately for revocation and management. Migration credentials are
+separate from the restricted runtime login. Owner credentials are never placed
+in project files, knowledge archives, Git or reader installations.
 
-Requests use a restricted runtime database login. Schema migration credentials
-are separate. Background jobs and credential lookup use the trusted worker role;
-requests bind a verified actor or scoped connection inside a transaction. The
-server operator controls the underlying database and can read its contents.
-Private communities protect against unauthorized clients, not the machine owner.
+Uploads carry a stable UUID and a SHA-256 fingerprint of the evidence-free text.
+The server recomputes the hash; identity is not authorization. Only an authenticated
+owner can replace that ID's current document in the selected community. Reader
+and upload queues have bounded memory and deadlines. The current document is
+atomically replaced; old accepted retries cannot restore old text. No publication
+review, contributor trust or historical revision workflow remains.
 
-Only explicitly selected findings go through the existing ingestion checks.
-Retrieved content remains untrusted evidence, never instructions. Optional model
-assistance is off unless explicitly configured. This change does not redesign
-upload validation, deduplication or claim review.
-
-Community data is searched remotely. Clients receive only requested snippets and
-findings; there is no whole-corpus download or cache fallback. Already delivered
-information cannot be recalled. Access changes block subsequent unauthorized
-requests, not information a reader already received.
-
-Use HTTPS outside localhost, protect operator secrets, and configure tested
-backups. Fair, bounded queues cover all community reads, including full documents. Waiting
-requests recheck authorization when admitted. Separate operator ingress slots
-keep revocation accessible. Request sizes, execution deadlines, memory budgets and
-fairness between communities and their reader connections bound work per service
-instance. Valid reads have no fixed minute quota. Only anonymous setup and invalid
-credentials consume the IP abuse bucket. They do not replace capacity measurement,
-proxy protection or database/disk monitoring. The loopback development installer
-is not a public hosting installer. Separate service processes must have separate
-search-cache directories.
+Community output is untrusted data, never a command or permission. Private
+communities protect against unauthorized clients, not the server operator.
+Already delivered knowledge cannot be recalled. Only an explicit owner deletion
+archive downloads the corpus; archives exclude keys, identities and access rules.
+HTTPS is required outside localhost. The local installer binds loopback; remote
+HTTPS provisioning remains the operator's responsibility.

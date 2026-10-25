@@ -89,9 +89,7 @@ func run() error {
 	if u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return errors.New("PUBLIC_URL must be an HTTP(S) origin without credentials, query, or path")
 	}
-	cfg := server.Config{PublicURL: strings.TrimRight(public, "/"), SupabaseURL: os.Getenv("SUPABASE_URL"), SupabaseKey: os.Getenv("SUPABASE_PUBLISHABLE_KEY"), WebDir: env("WEB_DIR", "web/dist"), CacheDir: env("CACHE_DIR", ".data/search"), ReviewURL: os.Getenv("REVIEW_URL"), ReviewKey: os.Getenv("REVIEW_API_KEY")}
-	cfg.GitHubClientID = os.Getenv("GITHUB_CLIENT_ID")
-	cfg.GitHubClientSecret = os.Getenv("GITHUB_CLIENT_SECRET")
+	cfg := server.Config{PublicURL: strings.TrimRight(public, "/"), CacheDir: env("CACHE_DIR", ".data/search")}
 	cfg.TrustedProxy = os.Getenv("TRUSTED_PROXY_IP")
 	cfg.OpsStatusDir = os.Getenv("OPS_STATUS_DIR")
 	cfg.JevEnabled = os.Getenv("JEV_ENABLED") == "true"
@@ -102,7 +100,6 @@ func run() error {
 	if localOnly {
 		cfg.LocalOwnerID = os.Getenv("LOCAL_OWNER_ID")
 		cfg.LocalOwnerToken = os.Getenv("LOCAL_OWNER_TOKEN")
-		cfg.WebDir = ""
 		if err := server.ValidateLocalOwner(cfg); err != nil {
 			return err
 		}
@@ -110,21 +107,6 @@ func run() error {
 	if !setupOnly && !localOnly {
 		if err := server.ValidateOperator(cfg); err != nil {
 			return err
-		}
-	}
-	if (cfg.GitHubClientID == "") != (cfg.GitHubClientSecret == "") {
-		return errors.New("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be configured together")
-	}
-	if cfg.SupabaseKey != "" && !strings.HasPrefix(cfg.SupabaseKey, "sb_publishable_") {
-		return errors.New("SUPABASE_PUBLISHABLE_KEY must be a publishable key; secret and service-role keys are forbidden")
-	}
-	for _, endpoint := range []string{cfg.SupabaseURL, cfg.ReviewURL} {
-		if endpoint == "" {
-			continue
-		}
-		p, e := url.Parse(endpoint)
-		if e != nil || p.Scheme != "https" || p.Hostname() == "" || p.User != nil || p.Fragment != "" {
-			return errors.New("identity and review endpoints must use HTTPS without embedded credentials")
 		}
 	}
 	s := server.New(db, cfg)
