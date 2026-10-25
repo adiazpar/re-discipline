@@ -153,11 +153,22 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		}
 	}
 	if conn.Service != "" {
-		if (p.Service != "" && strings.TrimRight(p.Service, "/") != conn.Service) || (p.Community != "" && p.Community != conn.CommunityID) {
+		if p.Service != "" && strings.TrimRight(p.Service, "/") != conn.Service {
 			return nil, fmt.Errorf("explicit destination conflicts with the connected alias; use one destination")
 		}
 		p.Service = conn.Service
-		p.Community = conn.CommunityID
+		if p.Action == "connect" {
+			// Connect resolves a server slug against the existing immutable ID.
+			// Preserve the supplied target; local aliases are not server slugs.
+			if p.Community == "" {
+				p.Community = conn.CommunityID
+			}
+		} else {
+			if p.Community != "" && p.Community != conn.CommunityID {
+				return nil, fmt.Errorf("explicit destination conflicts with the connected alias; use one destination")
+			}
+			p.Community = conn.CommunityID
+		}
 	}
 	if p.Action == "disconnect" {
 		return Disconnect(ctx, root, p.Alias)

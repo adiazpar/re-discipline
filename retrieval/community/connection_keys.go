@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
 	"github.com/zalando/go-keyring"
 )
 
@@ -150,7 +151,7 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 		}
 		// Legacy links did not retain the server slug. Read their own metadata when
 		// needed so a different spelling cannot allocate a second public connection.
-		if previous.Slug == "" && library != previous.CommunityID && library != previous.Alias {
+		if previous.Slug == "" && library != previous.CommunityID {
 			existing, e := NewConnectionClient(previous, root)
 			var info Library
 			if e == nil {
@@ -165,7 +166,7 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 			previous.Slug = info.Slug
 			settings.Connections[i].Slug = info.Slug
 		}
-		if library == previous.CommunityID || library == previous.Slug || library == previous.Alias {
+		if library == previous.CommunityID || library == previous.Slug {
 			previousIndex = i
 			library = previous.CommunityID
 			if alias != "" && alias != previous.Alias {
@@ -236,6 +237,9 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 	l := response.Community
 	if l.ID == "" {
 		return Connection{}, fmt.Errorf("server returned no community identity")
+	}
+	if requested, e := uuid.Parse(library); e == nil && requested.String() == library && l.ID != library {
+		return Connection{}, fmt.Errorf("server returned a different community identity")
 	}
 	if previousIndex >= 0 && settings.Connections[previousIndex].CommunityID != l.ID {
 		return Connection{}, fmt.Errorf("server returned a different community identity")

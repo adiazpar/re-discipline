@@ -392,6 +392,9 @@ func TestSameSlugAcrossOwnersAndReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := Execute(context.Background(), root, Command{Action: "connect", Service: host.URL, Alias: first.Alias, Community: "doom"}); err != nil {
+			t.Fatal("MCP reconnect by slug failed", err)
+		}
 		again, err := client.Connect(context.Background(), root, "", cid)
 		if err != nil || again.PublicKey != first.PublicKey || len(keys) != 1 {
 			t.Fatal("reconnect created identity", again, err, len(keys))
@@ -535,6 +538,68 @@ func TestDisconnectRefusesMisboundKey(t *testing.T) {
 	}
 	settings, err := LoadSettings(root)
 	if err != nil || len(settings.Connections) != 1 {
+		t.Fatal(settings, err)
+	}
+}
+
+func TestLocalAliasNeverSelectsServerCommunity(t *testing.T) {
+	keyring.MockInit()
+	t.Cleanup(keyring.MockInit)
+	root := t.TempDir()
+	ids := map[string]string{"godzilla": "00000000-0000-4000-8000-000000000001", "doom": "00000000-0000-4000-8000-000000000002"}
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Request
+		json.NewDecoder(r.Body).Decode(&req)
+		slug := req.Community
+		for name, id := range ids {
+			if id == req.Community {
+				slug = name
+			}
+		}
+		if req.Action == "community.get" {
+			json.NewEncoder(w).Encode(Library{ID: ids[slug], Slug: slug})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"community": Library{ID: ids[slug], Slug: slug}})
+	}))
+	defer host.Close()
+	c, _ := NewClient(host.URL)
+	first, err := c.Connect(context.Background(), root, "doom", "godzilla")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A legacy link has no stored server slug; resolve it with its own key.
+	settings, e := LoadSettings(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	settings.Connections[0].Slug = ""
+	if e := SaveSettings(root, settings); e != nil {
+		t.Fatal(e)
+	}
+	second, err := c.Connect(context.Background(), root, "", "doom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CommunityID != ids["doom"] || second.PublicKey == first.PublicKey || second.Alias == first.Alias {
+		t.Fatal("alias silently selected a different server community", first, second)
+	}
+}
+
+func TestConnectRejectsWrongImmutableIdentity(t *testing.T) {
+	keyring.MockInit()
+	t.Cleanup(keyring.MockInit)
+	root := t.TempDir()
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"community": Library{ID: "00000000-0000-4000-8000-000000000002", Slug: "doom"}})
+	}))
+	defer host.Close()
+	client, _ := NewClient(host.URL)
+	if _, err := client.Connect(context.Background(), root, "doom", "00000000-0000-4000-8000-000000000001"); err == nil {
+		t.Fatal("wrong immutable destination linked")
+	}
+	settings, err := LoadSettings(root)
+	if err != nil || len(settings.Connections) != 0 {
 		t.Fatal(settings, err)
 	}
 }
