@@ -1,5 +1,11 @@
 DO $$ BEGIN
- IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='re_community_worker') THEN CREATE ROLE re_community_worker NOLOGIN NOBYPASSRLS; END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='re_community_worker') THEN
+  BEGIN
+   CREATE ROLE re_community_worker NOLOGIN NOBYPASSRLS;
+  EXCEPTION WHEN duplicate_object OR unique_violation THEN
+   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 're_community_worker') THEN RAISE; END IF;
+  END;
+ END IF;
 END $$;
 GRANT re_community_worker TO CURRENT_USER;
 GRANT USAGE ON SCHEMA community TO re_community_worker;

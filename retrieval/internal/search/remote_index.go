@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // RemoteRecord stores the exact current text alongside its search entry. The
@@ -94,7 +95,16 @@ func ReadRemoteRecords(ctx context.Context, db *sql.DB, ids []string) (map[strin
 func ReplaceFile(src, dst string) error { return replaceFile(src, dst) }
 
 func ReadRemoteIndex(root string) (*sql.DB, error) {
-	p := IndexPath(root)
+	p, err := filepath.Abs(IndexPath(root))
+	if err != nil {
+		return nil, err
+	}
+	p = filepath.ToSlash(p)
+	// SQLite file URIs require /C:/... for Windows drive paths. Without the
+	// leading slash, net/url interprets the drive/path as a URI authority.
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
 	u := url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro&_pragma=busy_timeout(5000)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
