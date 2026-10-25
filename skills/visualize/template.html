@@ -362,7 +362,7 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
           <i><span class="dot ref"></span>reference entry</i>
           <i><span class="dot ex"></span>declares your term</i>
         </div>
-        <button class="btn" id="apply">Apply the penalty</button>
+        <button class="btn" id="apply">Apply ranking signals</button>
       </div>
       <div class="board" id="board"></div>
     </div>
@@ -370,11 +370,11 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
 
   <div class="stage">
     <div><div class="s-num"><i>06</i><div>
-      <h3>Re-rank: the rule scoring cannot express</h3>
+      <h3>Re-rank with field signals and declared names</h3>
       <p id="ratio"></p>
-      <p>So a reference entry gets <strong id="penline"></strong>, pushing it down &mdash;
-      <em>unless</em> it formally declares one of your terms as a name it owns. Ask about a concept
-      and you get facts. Ask for a name and the entry owning that name is exempt, and wins.</p>
+      <p>A reference entry gets <strong id="penline"></strong> unless it declares one of
+      your terms. Field coverage and ordered word pairs can improve its score. A whole-name
+      lookup gives declaring documents priority. Superseded documents remain last.</p>
     </div></div></div>
     <div class="box"><div class="box-h"><span>what the rule did here</span></div>
       <div class="box-b"><p style="margin:0;font-size:14px;color:var(--ink-soft)" id="ruletext"></p></div>
@@ -410,6 +410,9 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
 <script>
 const DATA = __DATA__;
 const R = DATA.stats.ranking;
+const penaltyRule = Number.isFinite(R.reference_penalty_fraction)
+  ? (100 * R.reference_penalty_fraction) + '% of the strongest current BM25 magnitude'
+  : '+' + R.reference_penalty;
 const S = DATA.stats;
 const PAD = 10, ROW = 46;
 let key = 'concept', applied = false;
@@ -492,7 +495,7 @@ window.PATH_SPEC = {
       notes: ['any term, not all', num(fetchN) + ' fetched, not ' + R.default_limit] },
     { t: 'an order', sub: 'BM25, then re-rank', edge: 'cut',
       notes: ['title x' + R.title_weight + ', idents x' + R.idents_weight + ', body x' + R.body_weight,
-              '+' + R.reference_penalty + ' to unowned reference docs'] },
+              'field boosts and a reference preference'] },
     { t: 'top ' + R.default_limit, sub: 'what you read', k: 'i' }
   ],
   foot: 'Matching is deliberately generous and scoring is where it narrows. Nothing is filtered ' +
@@ -504,7 +507,7 @@ html('cap-symbols', hasSym
     ' bulk records would distort the word counts that ranking depends on.'
   : 'This project ships no symbol file, so the exact-name table is empty.');
 set('cap-fetch-h', 'Why ' + num(fetchN) + ' candidates for a page of ' + R.default_limit + '.');
-set('cap-fetch', 'The penalty is applied after scoring, in code rather than in SQL, so it has to ' +
+set('cap-fetch', 'Field boosts and the reference preference apply after scoring, so the ranker must ' +
   'see far enough down the list that demoting a run of reference entries cannot leave the page ' +
   'short of the facts sitting underneath them.');
 
@@ -537,18 +540,16 @@ set('q-concept', DATA.traces.concept.question);
 set('q-ident', DATA.traces.ident.question);
 html('ratio', refs && facts
   ? 'Reference entries outnumber curated facts ' + (refs / facts).toFixed(1).replace(/\.0$/, '')
-    + ' to one. Left alone they win every plain-English question by sheer volume.'
-  : 'Reference entries are ranked below curated facts on plain-English questions, so a concept '
-    + 'question is never buried under bulk-generated entries.');
-set('penline', '+' + R.reference_penalty + ' added to its score');
+    + ' to one. Their short, keyword-dense text can crowd out relevant findings.'
+  : 'Field matching and a reference preference supplement BM25 relevance.');
+set('penline', penaltyRule + ' added to its score');
 set('foot', 'Traced from this project’s index · column weights '
   + R.title_weight + ' / ' + R.idents_weight + ' / ' + R.body_weight
-  + ' · reference penalty +' + R.reference_penalty
+  + ' · reference preference ' + penaltyRule
   + ' · page size ' + R.default_limit
   + (S.index_format ? ' · index format ' + S.index_format : ''));
 set('c-title', 'The title column carries ' + (R.title_weight / R.body_weight)
-  + ' times the weight of the body. A title stating the finding is the highest-leverage thing in '
-  + 'the document.');
+  + ' times the weight of the body. State the finding clearly so its words can match a question.');
 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -575,7 +576,8 @@ function render() {
       '<div class="rank"></div><div class="meta">' +
       '<span class="path">' + esc(trimPath(r.path)) + '</span><span class="tagline">' +
       '<span class="kindchip">' + (exempt ? 'declares it' : esc(r.kind || 'doc')) + '</span>' +
-      (r.penalty ? '<span class="note">+' + r.penalty + '</span>' : '') +
+      (r.penalty ? '<span class="note">+' + r.penalty.toFixed(2) + '</span>' : '') +
+      (r.boost ? '<span class="note">−' + r.boost.toFixed(2) + '</span>' : '') +
       '</span></div><div class="scorecell"><div class="track"><div class="fill"></div></div>' +
       '<span class="sc"></span></div>';
     el._d = r;
@@ -592,13 +594,14 @@ function render() {
 function place() {
   const rs = Array.prototype.slice.call(board.querySelectorAll('.row'));
   board.style.height = (rs.length * ROW + PAD * 2) + 'px';
-  const worst = Math.max.apply(null, rs.map(e => Math.abs(e._d.raw)).concat([1]));
-  rs.slice().sort((a, b) => applied ? a._d.final - b._d.final : a._d.raw - b._d.raw)
+  const worst = Math.max.apply(null, rs.flatMap(e => [Math.abs(e._d.raw), Math.abs(e._d.final)]).concat([1]));
+  rs.slice().sort((a, b) => applied ? a._d.final_rank - b._d.final_rank : a._d.raw_rank - b._d.raw_rank)
     .forEach((el, i) => {
       el.style.transform = 'translateY(' + (PAD + i * ROW) + 'px)';
-      el.classList.toggle('top', i < R.default_limit);
+      const rank = applied ? el._d.final_rank : el._d.raw_rank;
+      el.classList.toggle('top', rank <= R.default_limit);
       const s = applied ? el._d.final : el._d.raw;
-      el.querySelector('.rank').textContent = i + 1;
+      el.querySelector('.rank').textContent = rank;
       el.querySelector('.sc').textContent = s.toFixed(2);
       el.querySelector('.fill').style.width = (Math.abs(s) / worst * 100) + '%';
     });
@@ -606,37 +609,34 @@ function place() {
   board.classList.toggle('applied', applied);
   narrate();
   const b = document.getElementById('apply');
-  b.textContent = applied ? 'Undo the penalty' : 'Apply the penalty';
+  b.textContent = applied ? 'Show BM25 order' : 'Apply ranking signals';
   b.className = applied ? 'btn ghost' : 'btn';
 }
 
 // The commentary is derived from the trace rather than written per
-// project: what the penalty did here is a fact about these numbers.
+// project: what the ranking did here is a fact about these numbers.
 function narrate() {
   const t = DATA.traces[key];
   const moved = t.rows.filter(r => r.penalty > 0).length;
   const winner = t.rows.slice().sort((a, b) => a.final_rank - b.final_rank)[0];
   const rawTop = t.rows.slice().sort((a, b) => a.raw_rank - b.raw_rank)[0];
-  const climbed = t.rows.filter(r => r.final_rank < r.raw_rank).length;
+  const boosted = t.rows.filter(r => r.boost > 0).length;
 
   if (!applied) {
-    html('ruletext', 'Nothing has been demoted yet. This is bm25 alone: ' + moved +
-      ' of these candidates are reference entries that merely contain one of the words, and they ' +
-      'currently outrank everything else.');
+    html('ruletext', 'This is the reported BM25 order, before field boosts, the reference ' +
+      'preference and exact-name priority. Superseded documents still sort last.');
     html('verdict', '<strong>Before the rule:</strong> the order is decided purely by word ' +
       'statistics. The top result is <code>' + esc(trimPath(rawTop.path)) + '</code>.');
     return;
   }
   const exempt = winner.declares_query_term && winner.kind === 'reference';
-  html('ruletext', moved + ' reference ' + (moved === 1 ? 'entry declares' : 'entries declare') +
-    ' none of the terms asked for, so each took +' + R.reference_penalty + ' and fell. ' +
-    (climbed ? climbed + ' document' + (climbed === 1 ? '' : 's') + ' rose into the page without ' +
-      'any change to ' + (climbed === 1 ? 'its' : 'their') + ' own score.'
-      : 'Nothing overtook them here.'));
+  html('ruletext', moved + ' reference entries received a penalty; ' + boosted +
+    ' candidates received field boosts. Final score = BM25 + penalty − boost. Exact-name ' +
+    'priority and superseded status also affect the final order.');
   html('verdict', '<strong>After the rule:</strong> the top result is <code>' +
     esc(trimPath(winner.path)) + '</code>' +
     (exempt ? ', a reference entry that is exempt because it declares the name searched for'
-            : ', a curated document') +
+            : ', a ' + esc(winner.kind || 'knowledge') + ' document') +
     '. It moved from rank ' + winner.raw_rank + ' to ' + winner.final_rank +
     '. This is what <code>re-search query</code> prints.');
 }

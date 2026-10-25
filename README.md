@@ -458,8 +458,8 @@ queries than it helped, and the largest single render is 642 lines.
 re-search explain --json "what stops a demon attacking"
 ```
 
-Every candidate comes back with its bm25 score, reference penalty, exact-name
-priority and resulting rank. An exact whole-name lookup favors the document
+Every candidate comes back with its BM25 score, query-scaled reference penalty,
+field coverage, ordered-pair boost, exact-name priority and resulting rank. An exact whole-name lookup favors the document
 that declares that identifier; broader questions retain relevance ranking.
 `re-search stats` prints the matching census and ranking rules in force.
 
@@ -511,13 +511,19 @@ the curated facts on ordinary questions.
 
 `re-search` handles this without a filter the caller has to remember:
 
-- **Ranking** weights `title` and the identifier column above `body`.
+- **Ranking** weights `title` (2) and the expanded identifier/alias column (4)
+  above `body` (1). Unique query-word coverage and ordered word pairs in those
+  fields add bounded boosts. Repeating a word does not add coverage votes.
+  Partial and stemmed matches remain candidates.
 - **Exact whole-name lookups prefer declared identifiers** before score ranking
   and before the candidate limit. Short incidental mentions or aliases cannot
   crowd out the declaring document. Superseded documents still sort last, and
   kind/grade filters still apply. Broader questions keep relevance ranking.
 - **Reference docs take a rank penalty on concept questions**, and are
   exempt from it when the query names one of their declared `idents`.
+  The penalty is 30% of the strongest current BM25 magnitude, rather than a
+  fixed number that can overwhelm a short question. Coverage and ordered-pair
+  boosts use the same scale, with maximum fractions of 50% and 25% respectively.
   So "why did the boss stand still" reaches a curated fact, while
   "what does event `spawnSingleAI` do" reaches the reference entry.
 - **`idents:` frontmatter** declares the identifiers a doc owns. This is
@@ -538,6 +544,14 @@ the entry, and keep tags rare.
 Grow `golden.jsonl` before a bulk load, not after, and include questions
 whose expected answer is a reference doc — otherwise the bench can only
 measure harm to facts and never benefit to lookups.
+
+For ranking changes, freeze a separate question set before tuning. Compare real
+builds with `python3 scripts/evaluate-ranking.py --help`; it reports rank-one,
+top-five, top-eight, latency, repeated-run stability and duplicate UUIDs without
+calling a model. Keep private question sets and result files outside this public
+repository. See [the ranking experiment](retrieval/RANKING-EXPERIMENT.md) for
+the measured improvement and its limits. A higher aggregate score does not mean
+every individual question improved.
 
 You may be tempted to give reference material its own index so it cannot
 perturb the facts at all. That was measured on a 12,152-doc corpus and

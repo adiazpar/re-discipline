@@ -56,8 +56,11 @@ Then trace each one:
 Flags go BEFORE the question. Go stops parsing flags at the first
 non-flag argument, so `explain "..." --json` silently prints text.
 
-`explain` reports every candidate with its bm25 score, the penalty
-applied, the final score, and its rank before and after. It runs the
+`explain` reports every candidate with its BM25 score, reference penalty,
+field coverage, ordered-pair boost, final score, and rank before and after.
+The final score is `raw + penalty - boost`; exact-name priority and superseded
+status also affect order, so use the reported ranks rather than sorting scores.
+It runs the
 same ranking code as `query`, so what it says is what a search does.
 
 ## 3. Pull one real document and one real identifier

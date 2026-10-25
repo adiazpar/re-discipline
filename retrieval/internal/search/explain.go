@@ -27,21 +27,24 @@ func sortByRaw(rows []*ScoredHit) {
 // in rather than configured, so a caller that wants to describe or draw
 // the ranking has to be told them rather than read them from a file.
 type Ranking struct {
-	TitleWeight      float64 `json:"title_weight"`
-	IdentsWeight     float64 `json:"idents_weight"`
-	BodyWeight       float64 `json:"body_weight"`
-	ReferencePenalty float64 `json:"reference_penalty"`
-	DefaultLimit     int     `json:"default_limit"`
-	CandidateFetch   int     `json:"candidate_fetch_min"`
-	Tokenizer        string  `json:"tokenizer"`
-	StopWords        int     `json:"stop_words"`
+	TitleWeight              float64 `json:"title_weight"`
+	IdentsWeight             float64 `json:"idents_weight"`
+	BodyWeight               float64 `json:"body_weight"`
+	ReferencePenaltyFraction float64 `json:"reference_penalty_fraction"`
+	CoverageFraction         float64 `json:"coverage_fraction"`
+	OrderedPairFraction      float64 `json:"ordered_pair_fraction"`
+	DefaultLimit             int     `json:"default_limit"`
+	CandidateFetch           int     `json:"candidate_fetch_min"`
+	Tokenizer                string  `json:"tokenizer"`
+	StopWords                int     `json:"stop_words"`
 }
 
 // CurrentRanking returns the constants this build ranks with.
 func CurrentRanking() Ranking {
 	return Ranking{
 		TitleWeight: weightTitle, IdentsWeight: weightIdents, BodyWeight: weightBody,
-		ReferencePenalty: referencePenalty, DefaultLimit: 8,
+		ReferencePenaltyFraction: referencePenaltyFraction, CoverageFraction: coverageFraction,
+		OrderedPairFraction: orderedPairFraction, DefaultLimit: 8,
 		CandidateFetch: rerankFetchMin, Tokenizer: "porter unicode61",
 		StopWords: len(stopTerms),
 	}
@@ -134,8 +137,7 @@ func countGolden(root string) int {
 }
 
 // ExplainRow is one candidate plus where it sat before and after the
-// reference penalty was applied. A row whose two ranks differ is one the
-// penalty moved.
+// field signals and reference preference were applied.
 type ExplainRow struct {
 	ScoredHit
 	RawRank   int `json:"raw_rank"`
@@ -177,7 +179,7 @@ func Explain(root, q string, limit int) (ExplainResult, []string, error) {
 	}
 
 	// ranked is already in final order. Re-sorting a copy by raw score
-	// recovers where each row sat before the penalty, which is the whole
+	// recovers where each row sat before the adjustments, which is the whole
 	// point of the report.
 	byRaw := make([]*ScoredHit, len(ranked))
 	for i := range ranked {
@@ -223,7 +225,8 @@ func FormatStats(s StatsResult) string {
 	fmt.Fprintf(&b, "\nranking\n")
 	fmt.Fprintf(&b, "  weights      title x%v, idents x%v, body x%v\n",
 		r.TitleWeight, r.IdentsWeight, r.BodyWeight)
-	fmt.Fprintf(&b, "  penalty      +%v to reference docs declaring no query term\n", r.ReferencePenalty)
+	fmt.Fprintf(&b, "  penalty      +%v x strongest current BM25 magnitude for reference docs declaring no query term\n", r.ReferencePenaltyFraction)
+	fmt.Fprintf(&b, "  field boost  coverage x%v + ordered pairs x%v, on the same BM25 scale\n", r.CoverageFraction, r.OrderedPairFraction)
 	b.WriteString("  exact names  declared identifiers first within current/superseded groups\n")
 	fmt.Fprintf(&b, "  page size    %d (from %d candidates)\n", r.DefaultLimit, r.CandidateFetch)
 	fmt.Fprintf(&b, "  tokenizer    %s, %d stop words\n", r.Tokenizer, r.StopWords)
@@ -245,7 +248,7 @@ func FormatExplain(e ExplainResult) string {
 	}
 	fmt.Fprintf(&b, "\n%d candidates considered, %d returned. Current documents precede superseded ones; exact declared names precede score ranking within each group. Scores are negative; lower is better.\n\n",
 		len(e.Rows), e.Returned)
-	fmt.Fprintf(&b, "  %-4s %-4s %9s %7s %9s  %s\n", "was", "now", "bm25", "penalty", "final", "path")
+	fmt.Fprintf(&b, "  %-4s %-4s %9s %7s %7s %9s  %s\n", "was", "now", "bm25", "penalty", "boost", "final", "path")
 	for _, r := range e.Rows {
 		if r.FinalRank > e.Returned {
 			break
@@ -258,8 +261,8 @@ func FormatExplain(e ExplainResult) string {
 		} else if r.Declares {
 			note = "  (declares your term; penalty waived)"
 		}
-		fmt.Fprintf(&b, "  %-4d %-4d %9.3f %7.1f %9.3f  %s%s\n",
-			r.RawRank, r.FinalRank, r.Raw, r.Penalty, r.Final, r.Path, note)
+		fmt.Fprintf(&b, "  %-4d %-4d %9.3f %7.3f %7.3f %9.3f  %s%s\n",
+			r.RawRank, r.FinalRank, r.Raw, r.Penalty, r.Boost, r.Final, r.Path, note)
 	}
 	return b.String()
 }

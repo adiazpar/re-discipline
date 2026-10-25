@@ -50,25 +50,13 @@ type QueryOptions struct {
 // by sweeping combinations against golden.jsonl; identifier-bearing
 // titles and the idents column must outrank incidental body mentions.
 const (
-	weightTitle  = 4.0
+	weightTitle  = 2.0
 	weightBody   = 1.0
-	weightIdents = 2.0
+	weightIdents = 4.0
 )
 
-// referencePenalty is added to the bm25 score (negative = better, so
-// adding worsens) of kind:reference rows whose DECLARED identifiers
-// match no query term. Bulk-generated reference docs outnumber curated
-// fact docs by an order of magnitude and would otherwise displace them
-// on natural-language concept queries; a lookup that names a declared
-// identifier ("what does spawnSingleAI do") is exempt, so identifier
-// lookups reach their reference doc regardless of this value. Chosen by
-// sweeping 0.25–50 against golden.jsonl's fact and reference halves
-// separately: 7–15 maximizes both (fact 99/106, reference 41/42); 10 is
-// the midpoint of the plateau.
-const referencePenalty = 10.0
-
 // rerankFetchMin is how many candidate rows QueryOpts fetches before
-// applying referencePenalty in Go: enough that demoting reference rows
+// applying the field signals and reference preference in Go: enough that demoting reference rows
 // cannot starve the final page of the fact rows ranked just below them.
 const rerankFetchMin = 100
 
@@ -130,15 +118,15 @@ func queryIndex(root, q string, opts QueryOptions, refresh bool) ([]Hit, []strin
 	return hits, warnings, nil
 }
 
-// ScoredHit is one candidate with the ranking arithmetic left visible:
-// what bm25 said, what the reference penalty added, and what the two
-// came to. Explain reports these so a surprising result can be read
-// rather than guessed at.
+// ScoredHit exposes the same arithmetic used by query and snapshot retrieval.
 type ScoredHit struct {
 	Hit
-	Raw     float64 `json:"raw"`     // bm25, negative, more negative is better
-	Penalty float64 `json:"penalty"` // referencePenalty, or 0
-	Final   float64 `json:"final"`   // Raw + Penalty; the sort key
+	Raw          float64 `json:"raw"`     // bm25, negative, more negative is better
+	Penalty      float64 `json:"penalty"` // query-scaled reference preference, or 0
+	Boost        float64 `json:"boost"`   // query-scaled field coverage and ordered-pair signal
+	Final        float64 `json:"final"`   // Raw + Penalty - Boost; the sort key
+	Coverage     float64 `json:"coverage"`
+	OrderedPairs float64 `json:"ordered_pairs"`
 	// Declares reports that this doc names one of the query's terms in
 	// its own idents frontmatter, which is what waives the penalty.
 	Declares   bool `json:"declares_query_term"`
@@ -202,7 +190,7 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		SELECT docs.path, docs.title, docs.status, docs.kind, docs.grade,
 		       snippet(docs, 1, '«', '»', '…', 40),
 		       COALESCE(docmeta.evidence, ''),
-		       COALESCE(docmeta.idents, ''),
+		       COALESCE(docmeta.idents, ''), docs.idents,
 		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
  COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''), COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, ''),
 		       bm25(docs, %v, %v, %v) AS score,
@@ -236,12 +224,13 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		queryTerms[strings.Trim(t, `"`)] = true
 	}
 	var all []ScoredHit
+	features := newFieldQuery(q)
 	for rows.Next() {
 		var h Hit
-		var evidence, declared string
+		var evidence, declared, indexedIdents string
 		var score float64
 		var exactIdentifier bool
-		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &h.FindingID, &h.Fingerprint, &h.CreatedAt, &h.KnowledgeUpdatedAt, &score, &exactIdentifier); err != nil {
+		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &indexedIdents, &h.Build, &h.TextDigest, &h.FindingID, &h.Fingerprint, &h.CreatedAt, &h.KnowledgeUpdatedAt, &score, &exactIdentifier); err != nil {
 			return nil, match, warnings, err
 		}
 		if evidence != "" {
@@ -250,15 +239,13 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		s := ScoredHit{Hit: h, Raw: score, Final: score,
 			Declares: declaredIdentMatch(declared, queryTerms), Superseded: h.Status == "superseded",
 			ExactIdentifier: exactIdentifier}
-		if h.Kind == "reference" && !s.Declares {
-			s.Penalty = referencePenalty
-			s.Final = score + referencePenalty
-		}
+		s.Coverage, s.OrderedPairs = features.match(h.Title, indexedIdents)
 		all = append(all, s)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, match, warnings, err
 	}
+	applyFieldRanking(all)
 	// Superseded-last stays the outermost sort key, exactly as in the
 	// SQL ORDER BY; the stable sort preserves bm25 order among ties.
 	sort.SliceStable(all, func(i, j int) bool {

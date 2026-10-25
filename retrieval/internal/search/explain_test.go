@@ -89,12 +89,12 @@ holds demons to a walk
 		t.Fatalf("the declaring doc must be exempt: declares=%v penalty=%v",
 			owner.Declares, owner.Penalty)
 	}
-	if other.Declares || other.Penalty != referencePenalty {
+	if other.Declares || other.Penalty <= 0 {
 		t.Fatalf("the non-declaring reference doc must be charged: declares=%v penalty=%v",
 			other.Declares, other.Penalty)
 	}
-	if owner.Final != owner.Raw || other.Final != other.Raw+referencePenalty {
-		t.Fatalf("final must equal raw plus penalty: %+v %+v", owner, other)
+	if owner.Final != owner.Raw-owner.Boost || other.Final != other.Raw+other.Penalty-other.Boost {
+		t.Fatalf("final must equal raw plus penalty minus boost: %+v %+v", owner, other)
 	}
 	if owner.FinalRank != 1 {
 		t.Fatalf("the doc declaring the searched name must rank first, got %d", owner.FinalRank)
@@ -144,7 +144,7 @@ func TestStatsCountsTheCorpus(t *testing.T) {
 	}
 	r := st.Ranking
 	if r.TitleWeight != weightTitle || r.IdentsWeight != weightIdents ||
-		r.BodyWeight != weightBody || r.ReferencePenalty != referencePenalty {
+		r.BodyWeight != weightBody || r.ReferencePenaltyFraction != referencePenaltyFraction {
 		t.Fatalf("reported ranking constants must match the ones in use: %+v", r)
 	}
 	if r.StopWords != len(stopTerms) {
@@ -185,7 +185,7 @@ func TestStatsOnAnEmptyKnowledgeBase(t *testing.T) {
 	if st.Documents != 0 || st.Symbols != 0 || st.GoldenQuestions != 0 {
 		t.Fatalf("expected an all-zero census, got %+v", st)
 	}
-	if st.Ranking.ReferencePenalty != referencePenalty {
+	if st.Ranking.ReferencePenaltyFraction != referencePenaltyFraction {
 		t.Fatal("ranking constants must be reported even with no documents")
 	}
 }
