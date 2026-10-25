@@ -57,13 +57,13 @@ func TestFindingTimestampsTrackKnowledgeNotEvidence(t *testing.T) {
 	if info.Mode().Perm() != originalInfo.Mode().Perm() {
 		t.Fatal("permissions changed")
 	}
-	fp := KnowledgeFingerprint(ProjectPublication(first).Markdown)
+	fp := KnowledgeFingerprint(ProjectKnowledge(first).Markdown)
 	os.WriteFile(path, []byte(strings.ReplaceAll(first, "Private proof", "Updated evidence")), 0640)
 	evidence, changed := stamp(now.Add(time.Hour))
 	if changed {
 		t.Fatal("evidence advanced date")
 	}
-	if KnowledgeFingerprint(ProjectPublication(evidence).Markdown) != fp {
+	if KnowledgeFingerprint(ProjectKnowledge(evidence).Markdown) != fp {
 		t.Fatal("evidence changed fingerprint")
 	}
 	os.WriteFile(path, []byte(strings.ReplaceAll(evidence, "Clock original", "Clock corrected")), 0640)
@@ -76,7 +76,7 @@ func TestFindingTimestampsTrackKnowledgeNotEvidence(t *testing.T) {
 		t.Fatal(c, u)
 	}
 	dated, _ := knowledge.WithTimestamps(corrected, "2000-01-01T00:00:00Z", "2099-01-01T00:00:00Z")
-	if KnowledgeFingerprint(ProjectPublication(dated).Markdown) != KnowledgeFingerprint(ProjectPublication(corrected).Markdown) {
+	if KnowledgeFingerprint(ProjectKnowledge(dated).Markdown) != KnowledgeFingerprint(ProjectKnowledge(corrected).Markdown) {
 		t.Fatal("dates changed content fingerprint")
 	}
 	db.Close()

@@ -53,3 +53,9 @@ Upload acknowledgements prevent delayed server indexing from reversing this choi
 `knowledge.status` uses the same scan/comparison without changing source files or writing
 remote knowledge. Neither action removes files automatically. Never expose the
 operator credential, archive tickets or private project keys in output.
+
+Upload targeting is independent of retrieval: with multiple linked communities,
+supply one alias to `knowledge.upload` or `knowledge.status`. Multiple destinations
+require separately scoped operations. Each destination has independent inventory,
+upload receipts and last-matching-fingerprint bookkeeping. A reader link alone
+never confers operator authority or causes an automatic upload.

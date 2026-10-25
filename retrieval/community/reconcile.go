@@ -156,92 +156,240 @@ func copyChoice(local, remote string, sequence int64, base copyBase) (string, st
 	return "local", "local_preferred_diverged"
 }
 
-// Compare metadata for all candidate identities, including copies which no
-// longer match the search words. Losing text is removed before blending/ranking;
-// a nonmatching winner does not turn an obsolete match into a search result.
-func reconcileCopies(ctx context.Context, root string, conn Connection, local []Result, remote QueryResult) ([]Result, error) {
-	idsSet := map[string]bool{}
-	for _, h := range append(append([]Result{}, local...), remote.Hits...) {
-		if validCopyIdentity(h) {
-			idsSet[h.FindingID] = true
+// A candidate's identity is reconciled once across all selected sources. Remote
+// responses may arrive in any order; only a shared fingerprint establishes a
+// change, never another community's sequence number or wall-clock timestamp.
+func reconcileSources(ctx context.Context, root string, candidates, localHits []Result, connections []Connection, remotes []remoteResult, includeLocal bool) ([]Result, error) {
+	ids := candidateIdentityIDs(candidates)
+	locals := map[string]Result{}
+	if includeLocal {
+		copies, err := engine.LookupCopies(ctx, root, ids)
+		if err != nil {
+			return nil, err
 		}
-	}
-	ids := make([]string, 0, len(idsSet))
-	for id := range idsSet {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	copies, err := engine.LookupCopies(ctx, root, ids)
-	if err != nil {
-		return nil, err
-	}
-	locals := map[string]engine.Hit{}
-	for _, h := range copies {
-		if (h.Status != "promoted" && h.Status != "superseded") || (h.Kind != "fact" && h.Kind != "reference") {
-			continue
-		}
-		if _, ok := locals[h.FindingID]; ok {
-			return nil, fmt.Errorf("duplicate curated finding identity %s; assign distinct IDs to separate findings", h.FindingID)
-		}
-		locals[h.FindingID] = h
-	}
-	states := map[string]KnowledgeEntry{}
-	for _, h := range remote.Hits {
-		if validCopyIdentity(h) {
-			states[h.FindingID] = KnowledgeEntry{ID: h.FindingID, Fingerprint: h.Fingerprint, Sequence: h.Sequence}
-		}
-	}
-	for _, e := range remote.Compared {
-		states[e.ID] = e
-	}
-	bases, err := readCopyBases(ctx, root, conn, ids)
-	if err != nil {
-		return nil, err
-	}
-	choices := map[string]string{}
-	reasons := map[string]string{}
-	agreements := []KnowledgeEntry{}
-	for id, r := range states {
-		l, ok := locals[id]
-		if !ok {
-			choices[id] = "remote"
-			continue
-		}
-		choice, reason := copyChoice(l.Fingerprint, r.Fingerprint, r.Sequence, bases[id])
-		choices[id], reasons[id] = choice, reason
-		if choice == "equal" && (bases[id].Fingerprint != r.Fingerprint || bases[id].Sequence < r.Sequence) {
-			agreements = append(agreements, r)
-		}
-	}
-	out := make([]Result, 0, len(local)+len(remote.Hits))
-	for _, h := range append(append([]Result{}, local...), remote.Hits...) {
-		choice := choices[h.FindingID]
-		if h.Source == "local" {
-			if choice == "remote" {
+		for _, h := range copies {
+			if (h.Status != "promoted" && h.Status != "superseded") || (h.Kind != "fact" && h.Kind != "reference") {
 				continue
 			}
-			// The local index could have refreshed while the HTTP request was in flight.
-			if l, ok := locals[h.FindingID]; ok && l.Fingerprint != h.Fingerprint {
-				continue
+			if _, ok := locals[h.FindingID]; ok {
+				return nil, fmt.Errorf("duplicate curated finding identity %s; assign distinct IDs to separate findings", h.FindingID)
 			}
-		} else if choice == "local" {
+			locals[h.FindingID] = Result{Source: "local", FindingID: h.FindingID, Fingerprint: h.Fingerprint, Path: h.Path, Kind: h.Kind, Status: h.Status, CreatedAt: h.CreatedAt, KnowledgeUpdatedAt: h.KnowledgeUpdatedAt, MetadataOnly: true}
+		}
+	}
+	groups := map[string][]sourceCopy{}
+	for id, h := range locals {
+		groups[id] = append(groups[id], sourceCopy{hit: h})
+	}
+	for _, h := range localHits {
+		if h.Source == "local" && validCopyIdentity(h) {
+			if l, ok := locals[h.FindingID]; ok && l.Fingerprint == h.Fingerprint {
+				groups[h.FindingID][0].hit = h
+			}
+		}
+	}
+	live := map[string]QueryResult{}
+	pending := make([][]KnowledgeEntry, len(connections))
+	for i, conn := range connections {
+		if remotes[i].err != nil {
 			continue
 		}
-		if reason := reasons[h.FindingID]; reason != "" {
-			h.ContentDiffers = true
-			h.Resolution = reason
-			if h.Source == "local" {
-				r := states[h.FindingID]
-				h.OtherCopies = []Location{{Source: conn.Alias, Service: conn.Service, CommunityID: conn.CommunityID, FindingID: r.ID, Fingerprint: r.Fingerprint}}
-			} else {
-				l := locals[h.FindingID]
-				h.OtherCopies = []Location{{Source: "local", FindingID: l.FindingID, Fingerprint: l.Fingerprint, Path: l.Path}}
+		remote := remotes[i].result
+		live[conn.Alias] = remote
+		states := map[string]Result{}
+		for _, e := range remote.Compared {
+			h := Result{FindingID: e.ID, Fingerprint: e.Fingerprint, Sequence: e.Sequence}
+			remoteOrigin(&h, conn)
+			h.MetadataOnly = true
+			states[e.ID] = h
+		}
+		for _, h := range remote.Hits {
+			if validCopyIdentity(h) {
+				states[h.FindingID] = h
 			}
 		}
-		out = append(out, h)
+		bases := map[string]copyBase{}
+		if includeLocal {
+			var err error
+			bases, err = readCopyBases(ctx, root, conn, ids)
+			if err != nil {
+				return nil, err
+			}
+		}
+		agreements := []KnowledgeEntry{}
+		for _, id := range ids {
+			h, ok := states[id]
+			if !ok {
+				continue
+			}
+			groups[id] = append(groups[id], sourceCopy{hit: h, base: bases[id]})
+			if l, ok := locals[id]; ok && l.Fingerprint == h.Fingerprint && (bases[id].Fingerprint != h.Fingerprint || bases[id].Sequence < h.Sequence) {
+				agreements = append(agreements, KnowledgeEntry{ID: id, Fingerprint: h.Fingerprint, Sequence: h.Sequence})
+			}
+		}
+		pending[i] = agreements
 	}
-	if err = rememberCopies(ctx, root, conn, agreements); err != nil {
-		return nil, err
+	// Only advance agreements when all observed copies agree. Updating one
+	// equal mirror during a divergent query can erase contrary lineage and make
+	// the next identical query choose a different winner.
+	for i, agreements := range pending {
+		settled := []KnowledgeEntry{}
+		for _, e := range agreements {
+			same := true
+			for _, copy := range groups[e.ID] {
+				if copy.hit.Fingerprint != e.Fingerprint {
+					same = false
+					break
+				}
+			}
+			if same {
+				settled = append(settled, e)
+			}
+		}
+		if len(settled) > 0 {
+			if err := rememberCopies(ctx, root, connections[i], settled); err != nil {
+				return nil, err
+			}
+		}
+	}
+	out := []Result{}
+	for _, candidate := range candidates {
+		if validCopyIdentity(candidate) {
+			copies := groups[candidate.FindingID]
+			if len(copies) > 0 {
+				if hit, ok := resolveGroup(candidate.FindingID, copies); ok {
+					out = append(out, hit)
+				}
+				continue
+			}
+		}
+		// Legacy/incomplete identities are independent results, never evidence of
+		// equivalence. Failed sources cannot retain their first-round results.
+		if candidate.Source == "local" {
+			out = append(out, candidate)
+			continue
+		}
+		for _, h := range live[candidate.Source].Hits {
+			if h.FindingID == candidate.FindingID && h.Fingerprint == candidate.Fingerprint {
+				out = append(out, h)
+				break
+			}
+		}
 	}
 	return out, nil
+}
+
+type sourceCopy struct {
+	hit  Result
+	base copyBase
+}
+
+func resolveGroup(id string, copies []sourceCopy) (Result, bool) {
+	// Stable presentation and read locations, independent of response/config order.
+	sort.Slice(copies, func(i, j int) bool {
+		a, b := copies[i].hit, copies[j].hit
+		if (a.Source == "local") != (b.Source == "local") {
+			return a.Source == "local"
+		}
+		return a.Service+"\x00"+a.CommunityID+"\x00"+a.Source < b.Service+"\x00"+b.CommunityID+"\x00"+b.Source
+	})
+	byHash := map[string][]Result{}
+	var local *Result
+	for _, c := range copies {
+		byHash[c.hit.Fingerprint] = append(byHash[c.hit.Fingerprint], c.hit)
+		if c.hit.Source == "local" {
+			h := c.hit
+			local = &h
+		}
+	}
+	hashes := make([]string, 0, len(byHash))
+	for hash := range byHash {
+		hashes = append(hashes, hash)
+	}
+	sort.Strings(hashes)
+	winner, reason := "", ""
+	if len(hashes) == 1 {
+		winner = hashes[0]
+	} else if local != nil {
+		winner = local.Fingerprint
+		remoteWinners, reasons := map[string]bool{}, map[string]bool{}
+		for _, c := range copies {
+			if c.hit.Source == "local" || c.hit.Fingerprint == local.Fingerprint {
+				continue
+			}
+			choice, why := copyChoice(local.Fingerprint, c.hit.Fingerprint, c.hit.Sequence, c.base)
+			reasons[why] = true
+			if choice == "remote" {
+				remoteWinners[c.hit.Fingerprint] = true
+			}
+		}
+		switch {
+		case reasons["local_preferred_no_baseline"]:
+			reason = "local_preferred_no_baseline"
+		case reasons["local_preferred_diverged"] || len(remoteWinners) > 1:
+			reason = "local_preferred_diverged"
+		case len(remoteWinners) == 1:
+			for hash := range remoteWinners {
+				winner = hash
+			}
+			reason = "remote_changed"
+			// A second link may establish the opposite ordering: this proposed
+			// remote winner was already a shared base that local changed away
+			// from. Conflicting lineage cannot establish one global successor.
+			for _, c := range copies {
+				if c.base.Fingerprint == winner {
+					winner, reason = local.Fingerprint, "local_preferred_diverged"
+					break
+				}
+			}
+		case reasons["remote_index_behind"]:
+			reason = "remote_index_behind"
+		default:
+			reason = "local_changed"
+		}
+	}
+	if winner != "" {
+		hit := copyVariant(byHash[winner])
+		if hit.MetadataOnly {
+			return Result{}, false
+		} // Obsolete keyword suppression.
+		hit.Resolution = reason
+		hit.ContentDiffers = len(hashes) > 1
+		for _, c := range copies {
+			if c.hit.Fingerprint != winner {
+				hit.OtherCopies = append(hit.OtherCopies, copyLocation(c.hit))
+			}
+		}
+		return hit, true
+	}
+	// No local authority or shared baseline can order independent remote edits.
+	// One ranking slot contains explicit variants, including nonmatching metadata;
+	// no arbitrary source's text is presented as the authoritative group snippet.
+	group := Result{Source: "multiple", FindingID: id, Title: "Differing community copies", ContentDiffers: true, Resolution: "community_variants"}
+	matched := false
+	for _, hash := range hashes {
+		variant := copyVariant(byHash[hash])
+		matched = matched || !variant.MetadataOnly
+		group.Variants = append(group.Variants, variant)
+	}
+	return group, matched
+}
+
+func copyLocation(h Result) Location {
+	return Location{Source: h.Source, Service: h.Service, CommunityID: h.CommunityID, FindingID: h.FindingID, Fingerprint: h.Fingerprint, Path: h.Path, URL: h.URL}
+}
+
+func copyVariant(copies []Result) Result {
+	hit := copies[0]
+	for _, c := range copies {
+		if !c.MetadataOnly {
+			hit = c
+			break
+		}
+	}
+	hit.Locations = nil
+	for _, c := range copies {
+		hit.Locations = append(hit.Locations, copyLocation(c))
+	}
+	return hit
 }

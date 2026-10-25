@@ -82,7 +82,7 @@ func PrepareKnowledge(rel, raw string) (KnowledgeDocument, error) {
 			return d, fmt.Errorf("finding explicitly excludes upload")
 		}
 	}
-	projection := ProjectPublication(raw)
+	projection := ProjectKnowledge(raw)
 	d = KnowledgeDocument{ID: id, Path: rel, Markdown: projection.Markdown}
 	if len(d.Markdown) > MaxKnowledgeBytes {
 		return d, fmt.Errorf("publishable finding exceeds %d bytes", MaxKnowledgeBytes)

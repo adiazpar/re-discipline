@@ -85,6 +85,29 @@ func BenchmarkRetrievalPaths10000(b *testing.B) {
 			}
 		})
 	}
+	for _, count := range []int{4, 16} {
+		links := []Connection{}
+		for n := 0; n < count; n++ {
+			links = append(links, Connection{Alias: fmt.Sprintf("community-%d", n), Service: h.URL, CommunityID: fmt.Sprintf("00000000-0000-4000-8000-%012d", n+100001)})
+		}
+		if err := SaveSettings(root, Settings{Mode: "both", Connections: links}); err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("both_%d_communities", count), func(b *testing.B) {
+			if _, err := Query(context.Background(), root, "clockprobe", "both", false, engine.Options{Limit: 8, Assistance: "off"}); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				out, err := Query(context.Background(), root, "clockprobe", "both", false, engine.Options{Limit: 8, Assistance: "off"})
+				if err != nil || len(out.Hits) != 8 || len(out.Hits[0].Locations) != count+1 {
+					b.Fatal("duplicate copies affected results", out, err)
+				}
+			}
+		})
+	}
+
 }
 
 func BenchmarkBuildIndex10000(b *testing.B) {

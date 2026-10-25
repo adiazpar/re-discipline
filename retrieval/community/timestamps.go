@@ -24,7 +24,7 @@ func stampFinding(ctx context.Context, db stampStore, path, raw string, info os.
 	if err != nil {
 		return raw, false, err
 	}
-	fp := KnowledgeFingerprint(ProjectPublication(raw).Markdown)
+	fp := KnowledgeFingerprint(ProjectKnowledge(raw).Markdown)
 	var oldFP, oldCreated, oldUpdated, format string
 	err = db.QueryRowContext(ctx, `SELECT fingerprint,created_at,updated_at,format FROM finding_stamps WHERE id=?`, id).Scan(&oldFP, &oldCreated, &oldUpdated, &format)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

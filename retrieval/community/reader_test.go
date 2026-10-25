@@ -107,8 +107,8 @@ func TestProjectKeyScopeRenewalAndDisconnect(t *testing.T) {
 	if _, err = RemoteQuery(ctx, conn, "clock", engine.Options{}); err != nil || connects != 2 {
 		t.Fatal("public lease renewal", err, connects)
 	}
-	if _, err = c.Connect(ctx, root, "other", "godzilla"); err == nil || connects != 2 {
-		t.Fatal("second community contacted")
+	if _, err = c.Connect(ctx, root, "doom", "godzilla"); err == nil || connects != 2 {
+		t.Fatal("colliding alias contacted another community")
 	}
 	changed := conn
 	changed.Service = "https://other.example"

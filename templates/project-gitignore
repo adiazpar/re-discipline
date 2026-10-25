@@ -3,6 +3,7 @@ index.lock
 index.tmp-*.db
 index.db.build
 bin/
+# Retired publication/cache files may contain private material; keep ignored.
 community/
 community.json
 assistance.json

@@ -13,7 +13,7 @@ import (
 
 func TestProjectionKeepsConditionsAndShowsRemovedResearch(t *testing.T) {
 	raw := "---\nstatus: promoted\nevidence:\n- archive/private.md\nrenderer: Vulkan\n---\n# The feature works\n## Evidence\nVulkan only; fails on OpenGL.\n### Supporting evidence\nprivate trace\n### Observations\nmore private trace\n## Conditions\nRequires module X.\n"
-	p := ProjectPublication(raw)
+	p := ProjectKnowledge(raw)
 	if strings.Contains(p.Markdown, "private") || strings.Contains(p.Markdown, "fails on OpenGL") {
 		t.Fatal("research section leaked")
 	}
@@ -24,12 +24,12 @@ func TestProjectionKeepsConditionsAndShowsRemovedResearch(t *testing.T) {
 		t.Fatal("removed evidence was not retained in the local projection result")
 	}
 	for _, heading := range []string{"  ## Evidence ##", "Evidence\n--------", "## Research log"} {
-		p = ProjectPublication("# Claim\nTrue under conditions.\n" + heading + "\nprivate material\n## Conditions\nVulkan only.")
+		p = ProjectKnowledge("# Claim\nTrue under conditions.\n" + heading + "\nprivate material\n## Conditions\nVulkan only.")
 		if strings.Contains(p.Markdown, "private material") || !strings.Contains(p.Markdown, "Vulkan only") {
 			t.Fatalf("heading %q: %+v", heading, p)
 		}
 	}
-	p = ProjectPublication("# Claim\n````\n```\n## Evidence\nThis is code, not a section.\n````\n## Evidence\nprivate log")
+	p = ProjectKnowledge("# Claim\n````\n```\n## Evidence\nThis is code, not a section.\n````\n## Evidence\nprivate log")
 	if !strings.Contains(p.Markdown, "This is code") || strings.Contains(p.Markdown, "private log") {
 		t.Fatal("fence length confused section boundaries")
 	}
@@ -39,7 +39,7 @@ func TestCuratedProjectionPreservesKnowledge(t *testing.T) {
 	knowledge := "---\nstatus: promoted\nkind: fact\ngrade: direct\nbuild: Example build 123\nidents: [LoadTexture]\ntags: [textures]\n---\n# LoadTexture rejects compressed textures\n\n## Knowledge\n\nCompressed inputs return ERR_UNSUPPORTED.\n\n### Applicability\nDesktop rendering only; other paths are untested.\n\n### Example\n```text\n## Evidence\nThis heading is part of the example, not a section.\n```\n"
 	evidence := "\n## Evidence\n\nReport: archive/textures/reports/R-001.md#loader\n### Script\narchive/textures/work/test.py\n~~~text\n## Knowledge\nprivate trace\n~~~\n"
 	for _, raw := range []string{knowledge + evidence, "\ufeff" + strings.ReplaceAll(knowledge+evidence, "\n", "\r\n")} {
-		p := ProjectPublication(raw)
+		p := ProjectKnowledge(raw)
 		if p.Markdown != knowledge {
 			t.Fatalf("curated knowledge changed: %+v", p)
 		}
@@ -66,7 +66,7 @@ func TestLegacyLayoutsStripEvidence(t *testing.T) {
 		"fenced fake knowledge": "# Claim\n```\n## Knowledge\nDetails.\n```\n## Evidence\nprivate trace",
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := ProjectPublication(raw)
+			p := ProjectKnowledge(raw)
 			if strings.Contains(p.Markdown, "private trace") {
 				t.Fatalf("legacy boundary leaked evidence: %+v", p)
 			}

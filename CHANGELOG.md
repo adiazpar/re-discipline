@@ -2,31 +2,15 @@
 
 ## 1.10.0 (unreleased)
 
-- Require two human confirmation pauses for community deletion, with a durable per-community freeze and optional resumable, verified knowledge-only Zstandard archive. Exclude member/account identities, keys and access settings; preserve other communities and reopen safely on cancellation or expiry.
-
-- Add operator-only permanent community deletion, including its documents/history, access grants, background jobs, indexes and queued work. Resume interrupted derived-file cleanup, preserve unrelated communities, and remove the calling project's matching link/key automatically.
-
-- Connect one project to one community with an OS-stored Ed25519 private key, signed requests and replay protection. Use single-use private invitations, renewable 180-day inactivity leases, explicit disconnect and indexed expiry cleanup; load-test 1,000 project keys across public/private communities.
-
-- Share retrieval capacity between communities and then reader connections without fixed authenticated minute quotas; bound automatic busy-read retries and reject contradictory community provenance. Add reader-flood, credential-quota and concurrent document-ID isolation tests.
-
-- Size shared retrieval capacity from CPU, memory and database headroom; replace fixed per-community caps with cost-aware fair queues, cancellation, deadlines, overload protection and operator `server.stats`.
-- Schedule document reads alongside searches; batch result hydration, cache immutable revision maps within a byte budget, and coalesce/cancel cold-index builds. Add equal/skewed/single-community and agent search/read load tests.
-
-- Make community retrieval remote-only; retire sync and dashboard skills, migrate old sync settings to remote, and stop exposing corpus-download routes.
-- Restrict all creation and uploads to the server operator. Replace account linking with project key connections, automatic public joining, and revocable private invitations.
-- Allow concurrent searches on immutable per-community indexes, bound active requests/searches, prepare indexes in the background, and add a disposable PostgreSQL-backed load test with 1,000 readers.
-
-- Consolidate the optional community server, schema, dashboard, and tests into `server/`, sharing the engine directly and removing dependence on a separate service repository or centrally hosted endpoint.
-- Route community skills to owner-hosted servers; add a repeatable local Docker/OrbStack setup and credential-free MCP `server.ping`. Setup mode exposes database-backed health only, with community access disabled.
-- Add automatic local-owner access, private community creation and trusted publication, with two-community retrieval/isolation tests through both provider adapters. Reuse one PostgreSQL database and the shared retrieval engine with separate community indexes.
-- Require private community creation and owner-only changes to public; remove unlisted visibility from the API, dashboard, and skills, and migrate existing unlisted communities to private.
-- Reject conflicting project destinations and legacy multi-community retrieval; invalidate withdrawn findings correctly when addressed by slug.
-- Bundle native macOS (Intel/Apple Silicon) and Linux (x64/ARM64) engines alongside Windows x64; select the correct engine automatically.
-- Share one marketplace catalog across Claude and Codex, with small provider-specific MCP and hook adapters and no Windows Bash dependency.
-- Install and refresh the project-local native binary automatically during init; use one cross-platform session summary.
-- Retry brief Windows executable locks during project-binary refresh, including immediately after a process exits.
-- Add a portable pinned build, five-platform CI, corpus and host smoke checks, and separate installation instructions for each host.
+- Bundle native Windows x64, macOS Intel/Apple Silicon and Linux x64/ARM64 engines. Share one marketplace catalog across Claude and Codex with small provider-specific MCP/hook adapters and no Windows Bash requirement. Automatically install and refresh project binaries; test real marketplace discovery, MCP adapters, hooks and a golden corpus on all five native CI targets.
+- Bundle the optional operator-hosted server in `server/`, importing the same retrieval engine. Remove the separate service repository dependency, central endpoint, OAuth/account linking, browser dashboard and corpus synchronization workflows. Provide repeatable local Docker/OrbStack installation and credential-free health checks.
+- Give each community separate knowledge and an index on one shared server. Default to private, allow explicit public joining, and restrict creation, uploads, deletion, visibility and access management to the operator. Retire contributor roles, publication/review queues and retained document revisions; migrations preserve current knowledge while dropping obsolete tables.
+- Link a project to multiple communities across operators. Keep separate OS-stored Ed25519 keys per link, signed requests, replay protection, single-use private invitations, renewable 180-day inactivity leases, explicit disconnect and expiry cleanup. Reuse existing connections and preserve older single-link keys.
+- Search all linked communities by default, or a selected subset. Reconcile all sources before ranking: exact copies share one result and provenance, unambiguous changes select the updated copy, and ambiguous changes prefer curated local knowledge. Without local authority, differing remote copies form one source-labelled variant group. Bound parallel requests and comparison metadata; retain available sources during partial outages.
+- Maintain stable finding UUIDs, creation/knowledge timestamps and Evidence-free fingerprints. Keep research in one local Evidence section. Automatically upload changed owner knowledge in bounded batches, preserving identity through edits/renames; never delete remote content merely because a local file is missing. Upload destinations remain explicit and independent of retrieval links.
+- Share retrieval capacity fairly between communities and readers without fixed authenticated minute quotas. Size capacity from CPU, memory and database headroom; bound queues, retries, cancellation and deadlines. Expose operator resource statistics and test actual query/full-document accuracy under concurrent readers and bulk uploads.
+- Require two human confirmation pauses for community deletion, with a per-community freeze and optional resumable, verified knowledge-only Zstandard archive. Exclude members, keys and access settings. Preserve other communities, reopen on cancellation/expiry, and resume interrupted cleanup.
+- Keep optional Jev query assistance separate from authority and upload policy. Preserve ordinary ordering when remote variants remain unresolved. Remove stale skills, MCP publication descriptions, receipt-directory instructions and unused publication namespace state.
 
 ## 1.9.1
 

@@ -10,10 +10,10 @@ import (
 	"github.com/adiazpar/re-discipline/retrieval/semantic"
 )
 
-// ClaimProjection and ProjectPublication use the same projection as the search index.
+// ClaimProjection and ProjectKnowledge use the same projection as the search index.
 type ClaimProjection = knowledge.ClaimProjection
 
-func ProjectPublication(raw string) ClaimProjection { return knowledge.ProjectPublication(raw) }
+func ProjectKnowledge(raw string) ClaimProjection { return knowledge.ProjectKnowledge(raw) }
 
 // ClaimDigest ignores transport/provenance metadata, never numbers, qualifiers or
 // body sections. Legacy bodies are not automatically rewritten for equivalence.

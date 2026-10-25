@@ -14,7 +14,8 @@ community by default. `--users`, `--requests` (default 2,000 workflows), and
 the same UUIDs are deliberately reused with different content in each community
 to detect scope or fingerprint mix-ups. Each query also compares all 32 known
 identities in its community and validates every returned hash and generation. One
-workflow includes both query and full read.
+workflow includes both query and full read. The helper also runs the multi-community
+client workload described below against two isolated server instances.
 
 Any incorrect/missing result, wrong scope, incomplete batch, or exhausted client
 retry fails the test. Bounded automatic retries retain the same credential/scope.
@@ -144,3 +145,76 @@ The added timestamp/baseline bookkeeping increases upload-scan work compared wit
 the earlier 271/622-ms measurements. First-time timestamp insertion rewrites source
 metadata; fixture setup and that one-time work are excluded from steady-state
 measurements. These are small synthetic files, not a 10 GB validation.
+
+
+## Multi-community reconciliation (2026-10-25)
+
+The current policy searches all linked communities by default and groups copies
+before ranking. Unit tests cover every ordering of three communities, repeated
+unchanged queries, opposite per-link lineage, local/remote corrections, obsolete
+keywords, independently divergent variants, partial failures, bounded candidate
+comparisons, private-key separation, legacy key reuse, concurrent linking,
+copying projects, same slugs on different owners, explicit upload destinations and
+isolated disconnect. Unresolved variants bypass optional assistance. Untrusted
+servers cannot inject grouped variants or their provenance.
+
+Both Claude and Codex MCP adapters passed the actual multi-community flow against
+the local server, including separate OS-stored keys, upload to selected aliases,
+three-location dedupe, a correction on one community while another retains the
+old copy, source-labelled external variants, full reads, narrowed queries and
+unlinking one community while preserving the other's key. Existing curation,
+owner-only write denial, timestamps and archive/deletion smoke checks also passed.
+The installed Codex host discovered all six current skills and returned 3/3 golden
+answers; Claude's installed MCP connection and both providers' hooks passed.
+
+The Linux load container used two CPUs and 512 MiB (Go target 384 MiB). All
+**2,000 search/full-read workflows**, **64,000 comparison entries**, and **8,000
+concurrent uploaded documents** passed with 1,000 signed reader keys across four
+public/private communities. There were **zero wrong/missing results, scope or
+fingerprint mismatches, rejected requests or expired queue entries**.
+
+| Single-community workflow metric | Measured |
+|---|---:|
+| Median search + full read | 305.2 ms |
+| p95 | 754.2 ms |
+| Slowest | 3.88 s |
+| Read/upload workload | 12.34 s |
+| Additional background indexing | 36.28 s |
+| Start to fully indexed | 48.62 s |
+| Peak container memory, including generator | 408.6 MiB |
+
+A second workload exercised the plugin's complete multi-community coordinator,
+using **16 projects, 64 signed connections, four communities on two server
+instances**, and **32 concurrent workflows**. All **256 combined queries** and
+**1,024 source-specific variant reads** passed while owners uploaded another 160
+documents. Each query checked one deduplicated shared finding, one four-variant
+group and four community-specific findings, including local preference in `both`.
+Every variant's full Markdown and fingerprint matched its own community. Subset
+selection and disconnect isolation were checked afterward. Median workflow time
+was **248 ms**, p95 **488 ms**, and the read/upload phase took **2.19 seconds**.
+The server tests use an in-memory credential backend with real signed HTTP; the
+adapter smoke separately exercises the actual operating-system credential store.
+
+These are synthetic correctness and load observations, not production capacity
+promises, zero-latency guarantees or a 10 GB corpus evaluation. The two server
+instances share the constrained test container; the PostgreSQL service is separate.
+Disposable test databases and containers are cleaned up automatically.
+
+
+An isolated Apple M2/macOS benchmark (10 iterations, one sample, 10,000 synthetic
+Markdown files and loopback community responses) measured:
+
+| Client query | Time |
+|---|---:|
+| Local | 39.31 ms |
+| External, one community | 0.465 ms |
+| Both, one community | 40.80 ms |
+| Both, four communities with duplicate copies | 44.47 ms |
+| Both, sixteen communities with duplicate copies | 50.39 ms |
+
+The combined queries asserted eight distinct results and retained every expected
+location. Cached 10,000-file upload scanning took 415 ms with zero file rereads or
+uploads; full verification took 983 ms and read all 10,000 files. These figures do
+not include internet latency. More linked communities require more server requests;
+bounded client concurrency controls the burst without hiding sources or downloading
+corpora. Native Windows, Intel Mac and both Linux architectures remain in CI.

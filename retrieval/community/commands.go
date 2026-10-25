@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/adiazpar/re-discipline/retrieval/engine"
 	"github.com/adiazpar/re-discipline/retrieval/semantic"
 )
 
@@ -57,6 +59,11 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 	case "connections":
 		return LoadSettings(root)
 	case "retrieval.set":
+		unlock, e := lockProjectConnection(ctx, root)
+		if e != nil {
+			return nil, e
+		}
+		defer unlock()
 		s, e := LoadSettings(root)
 		if e != nil {
 			return nil, e
@@ -67,6 +74,11 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 		s.Retrieval = p.Retrieval
 		return s, SaveSettings(root, s)
 	case "mode.set":
+		unlock, e := lockProjectConnection(ctx, root)
+		if e != nil {
+			return nil, e
+		}
+		defer unlock()
 		s, e := LoadSettings(root)
 		if e != nil {
 			return nil, e
@@ -85,13 +97,48 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Project search uses the same grouping policy through both MCP entrypoints.
+	if p.Action == "query" && p.Service == "" && p.Community == "" {
+		var input struct {
+			Query       string   `json:"query"`
+			Limit       int      `json:"limit"`
+			Kind        string   `json:"kind"`
+			Grade       string   `json:"grade"`
+			Communities []string `json:"communities"`
+		}
+		if err := json.Unmarshal(p.Data, &input); err != nil {
+			return nil, err
+		}
+		if p.Alias != "" {
+			for _, alias := range input.Communities {
+				if alias != p.Alias {
+					return nil, fmt.Errorf("query alias conflicts with selected communities")
+				}
+			}
+			input.Communities = []string{p.Alias}
+		}
+		mode := p.Mode
+		if mode == "" {
+			mode = "external"
+		}
+		return Query(ctx, root, input.Query, mode, false, engine.Options{Limit: input.Limit, Kind: input.Kind, Grade: input.Grade, Communities: input.Communities})
+	}
 	var conn Connection
 	if p.Alias == "" && (readOperation(p.Action) || p.Action == "knowledge.upload" || p.Action == "knowledge.status") {
 		if len(settings.Connections) > 1 {
-			return nil, fmt.Errorf("disconnect extra legacy links before retrieval")
+			if p.Service == "" || p.Community == "" {
+				return nil, fmt.Errorf("select a community alias for this operation; uploads and document reads have one explicit destination")
+			}
 		}
-		if len(settings.Connections) == 1 {
+		if len(settings.Connections) == 1 && p.Service == "" && p.Community == "" {
 			conn = settings.Connections[0]
+		} else {
+			for _, linked := range settings.Connections {
+				if linked.Service == strings.TrimRight(p.Service, "/") && linked.CommunityID == p.Community {
+					conn = linked
+					break
+				}
+			}
 		}
 	}
 	if p.Alias != "" {
@@ -224,14 +271,14 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
 		"root":      map[string]any{"type": "string", "description": "Absolute active project root; use it when calling through a plugin."},
-		"action":    map[string]any{"type": "string", "enum": []string{"server.ping", "status", "assistance.status", "assistance.set", "connections", "connect", "disconnect", "mode.set", "retrieval.set", "knowledge.identify", "knowledge.status", "knowledge.upload", "knowledge.get", "knowledge.delete", "community.create", "community.list", "community.get", "community.update", "community.delete", "community.archive", "server.stats", "access.create", "access.list", "access.revoke", "query", "usage", "audit.list"}, "description": "Readers connect, search and read one community. Only the server operator manages content or communities. knowledge.identify maintains local finding IDs and curation timestamps after edits. knowledge.upload replaces changed files automatically. community.delete requires separate human confirmation for locking and final deletion."},
+		"action":    map[string]any{"type": "string", "enum": []string{"server.ping", "status", "assistance.status", "assistance.set", "connections", "connect", "disconnect", "mode.set", "retrieval.set", "knowledge.identify", "knowledge.status", "knowledge.upload", "knowledge.get", "knowledge.delete", "community.create", "community.list", "community.get", "community.update", "community.delete", "community.archive", "server.stats", "access.create", "access.list", "access.revoke", "query", "usage", "audit.list"}, "description": "Readers search all linked communities by default, or an explicit subset. Each key and document read stays scoped to one community. Only the server operator manages content or communities. knowledge.identify maintains local finding IDs and curation timestamps after edits. knowledge.upload replaces changed files automatically. community.delete requires separate human confirmation for locking and final deletion."},
 		"retrieval": map[string]any{"type": "string", "enum": []string{"remote"}, "description": "Community retrieval is remote-only. No corpus download or offline cache."},
-		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Local output archive path"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; each project links one community. See the community skill reference."}}, "required": []string{"action"}}
+		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Local output archive path"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; projects can link multiple communities. Uploads and document reads require an alias when multiple links exist. See the community skill reference."}}, "required": []string{"action"}}
 }
 
 func ReadCommandFile(path string) ([]byte, error) {
 	if path == "" || path == "-" {
-		return os.ReadFile("/dev/stdin")
+		return io.ReadAll(os.Stdin)
 	}
 	return os.ReadFile(path)
 }

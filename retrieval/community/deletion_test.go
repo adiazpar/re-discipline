@@ -61,7 +61,7 @@ func TestDeleteCommunityUsesOwnerAndRemovesOnlyMatchingLink(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario != "missing_reader_key" {
-				if err = keyring.Set(connectionKeyService, ref, "private fixture value"); err != nil {
+				if err = saveProjectKey(ref, projectKey{Service: h.URL, Community: cid, Seed: "private fixture value"}); err != nil {
 					t.Fatal(err)
 				}
 			}

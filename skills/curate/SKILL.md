@@ -53,7 +53,7 @@ moment never comes back.
   Community upload removes this section from a copy and never follows its links.
   The title, metadata and Knowledge must therefore stand alone without Evidence.
   Do not leave a condition or exception only in Evidence. A finding remains local
-  until publication is authorized.
+  until an upload is authorized.
 - Do NOT put findings into `docs/` — promotion is the manager's job.
 
 ## If you are the manager promoting
@@ -89,5 +89,5 @@ it. Dates use UTC RFC3339; never manually make a date newer to change retrieval
 priority. Legacy findings get their first recorded date when maintained. Upload
 also maintains these fields. Plain editor changes get their date at the next
 curation/upload action; queries still detect changed content automatically.
-The fingerprint and one last matching remote fingerprint live in the existing
-disposable index, not in frontmatter. No historical document versions are stored.
+The fingerprint and one last matching fingerprint per community link live in the
+existing disposable index, not in frontmatter. No historical document versions are stored.

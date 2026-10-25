@@ -9,7 +9,7 @@ type ClaimProjection struct {
 	RemovedMaterial string   `json:"removed_material,omitempty"` // local preview only
 }
 
-func ProjectPublication(raw string) ClaimProjection {
+func ProjectKnowledge(raw string) ClaimProjection {
 	text := strings.ReplaceAll(strings.TrimPrefix(raw, "\ufeff"), "\r\n", "\n")
 	p := ClaimProjection{RemovedSections: []string{}}
 	lines := strings.Split(text, "\n")

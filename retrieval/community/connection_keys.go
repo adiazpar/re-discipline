@@ -54,7 +54,7 @@ func saveProjectKey(ref string, k projectKey) error {
 
 // Derive the local lookup from the current project path. A copied config cannot
 // borrow or delete the original project's key on the same machine.
-func connectionKeyRef(root, service string) (string, error) {
+func connectionKeyRef(root, service string, scope ...string) (string, error) {
 	canonical, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
@@ -62,13 +62,17 @@ func connectionKeyRef(root, service string) (string, error) {
 	if real, e := filepath.EvalSymlinks(canonical); e == nil {
 		canonical = real
 	}
-	sum := sha256.Sum256([]byte(canonical + "\x00" + service))
+	material := canonical + "\x00" + service
+	if len(scope) > 0 && scope[0] != "" {
+		material += "\x00community\x00" + scope[0]
+	}
+	sum := sha256.Sum256([]byte(material))
 	return hex.EncodeToString(sum[:]), nil
 }
 func NewConnectionClient(conn Connection, roots ...string) (*Client, error) {
 	if conn.KeyRef != "" && len(roots) > 0 {
 		var err error
-		conn.KeyRef, err = connectionKeyRef(roots[0], conn.Service)
+		conn.KeyRef, err = connectionKeyRef(roots[0], conn.Service, conn.KeyScope)
 		if err != nil {
 			return nil, err
 		}
@@ -133,28 +137,56 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 	if err != nil {
 		return Connection{}, err
 	}
-	if len(settings.Connections) > 1 {
-		return Connection{}, fmt.Errorf("disconnect the extra legacy links first; one project connects to one community")
-	}
-	if alias != "" && (!regexpAlias.MatchString(alias) || alias == "local") {
-		return Connection{}, fmt.Errorf("alias must be 1 to 64 lowercase letters, digits or hyphens; local is reserved")
+	if alias != "" && (!regexpAlias.MatchString(alias) || alias == "local" || alias == "multiple") {
+		return Connection{}, fmt.Errorf("alias must be 1 to 64 lowercase letters, digits or hyphens; local and multiple are reserved")
 	}
 	if library == "" {
 		return Connection{}, fmt.Errorf("select a community")
 	}
-	ref, err := connectionKeyRef(root, c.URL)
+	previousIndex := -1
+	for i, previous := range settings.Connections {
+		if previous.Service != c.URL {
+			continue
+		}
+		// Legacy links did not retain the server slug. Read their own metadata when
+		// needed so a different spelling cannot allocate a second public connection.
+		if previous.Slug == "" && library != previous.CommunityID && library != previous.Alias {
+			existing, e := NewConnectionClient(previous, root)
+			var info Library
+			if e == nil {
+				e = existing.Operation(ctx, "community.get", previous.CommunityID, nil, &info)
+			}
+			if e != nil {
+				return Connection{}, fmt.Errorf("cannot resolve existing link %s: %w", previous.Alias, e)
+			}
+			if info.ID != previous.CommunityID {
+				return Connection{}, fmt.Errorf("server returned a different community identity")
+			}
+			previous.Slug = info.Slug
+			settings.Connections[i].Slug = info.Slug
+		}
+		if library == previous.CommunityID || library == previous.Slug || library == previous.Alias {
+			previousIndex = i
+			library = previous.CommunityID
+			if alias != "" && alias != previous.Alias {
+				return Connection{}, fmt.Errorf("community already linked as %s", previous.Alias)
+			}
+			alias = previous.Alias
+			break
+		}
+	}
+	for i, previous := range settings.Connections {
+		if alias != "" && previous.Alias == alias && i != previousIndex {
+			return Connection{}, fmt.Errorf("alias %s already names another community", alias)
+		}
+	}
+	scope := library
+	if previousIndex >= 0 {
+		scope = settings.Connections[previousIndex].KeyScope
+	}
+	ref, err := connectionKeyRef(root, c.URL, scope)
 	if err != nil {
 		return Connection{}, err
-	}
-	if len(settings.Connections) == 1 {
-		previous := settings.Connections[0]
-		if previous.Service != c.URL || (library != previous.CommunityID && library != previous.Alias) || (alias != "" && alias != previous.Alias) {
-			return Connection{}, fmt.Errorf("this project already connects to %s; disconnect it before choosing another community", previous.Alias)
-		}
-		library = previous.CommunityID
-		if previous.KeyRef != "" {
-			ref = previous.KeyRef
-		}
 	}
 	k, err := readProjectKey(ref)
 	if errors.Is(err, keyring.ErrNotFound) {
@@ -205,7 +237,7 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 	if l.ID == "" {
 		return Connection{}, fmt.Errorf("server returned no community identity")
 	}
-	if len(settings.Connections) == 1 && settings.Connections[0].CommunityID != l.ID {
+	if previousIndex >= 0 && settings.Connections[previousIndex].CommunityID != l.ID {
 		return Connection{}, fmt.Errorf("server returned a different community identity")
 	}
 	if k.Community != "" && k.Community != l.ID {
@@ -213,19 +245,30 @@ func (c *Client) Connect(ctx context.Context, root, alias, library string) (Conn
 	}
 	if alias == "" {
 		alias = l.Slug
+		for _, existing := range settings.Connections {
+			if existing.Alias == alias {
+				digest := sha256.Sum256([]byte(c.URL + "\x00" + l.ID))
+				base := alias
+				if len(base) > 54 {
+					base = base[:54]
+				}
+				alias = base + "-" + hex.EncodeToString(digest[:4])
+			}
+		}
 	}
-	if !regexpAlias.MatchString(alias) || alias == "local" {
+	if !regexpAlias.MatchString(alias) || alias == "local" || alias == "multiple" {
 		return Connection{}, fmt.Errorf("server returned an invalid alias; supply a local alias")
 	}
 	k.Community = l.ID
 	if err = saveProjectKey(ref, k); err != nil {
 		return Connection{}, err
 	}
-	next := Connection{Alias: alias, Service: c.URL, CommunityID: l.ID, Name: l.Name, KeyRef: ref, PublicKey: base64.RawURLEncoding.EncodeToString(private.Public().(ed25519.PublicKey))}
-	if len(settings.Connections) == 1 {
-		next.SourceNamespace = settings.Connections[0].SourceNamespace
+	next := Connection{KeyScope: scope, Slug: l.Slug, Alias: alias, Service: c.URL, CommunityID: l.ID, Name: l.Name, KeyRef: ref, PublicKey: base64.RawURLEncoding.EncodeToString(private.Public().(ed25519.PublicKey))}
+	if previousIndex >= 0 {
+		settings.Connections[previousIndex] = next
+	} else {
+		settings.Connections = append(settings.Connections, next)
 	}
-	settings.Connections = []Connection{next}
 	if settings.Mode == "local" {
 		settings.Mode = "both"
 	}
@@ -268,7 +311,16 @@ func disconnect(ctx context.Context, root, alias string, deleted *Connection) (a
 		result["server_removed"] = true
 	}
 	if target.KeyRef != "" {
-		var e error
+		// A damaged or hand-edited link must never delete another community's
+		// private key, even if its nonsecret lookup happens to point there.
+		key, e := readProjectKey(target.KeyRef)
+		if e != nil && !errors.Is(e, keyring.ErrNotFound) {
+			return nil, fmt.Errorf("cannot inspect local project key: %w", e)
+		}
+		if e == nil && (key.Service != target.Service || key.Community != target.CommunityID) {
+			return nil, fmt.Errorf("connection key belongs to another community; link and key retained")
+		}
+		e = nil
 		if deleted == nil {
 			var c *Client
 			c, e = NewConnectionClient(target)
@@ -292,7 +344,7 @@ func disconnect(ctx context.Context, root, alias string, deleted *Connection) (a
 	if len(next) == 0 {
 		settings.Mode = "local"
 	}
-	// Permit disconnecting one extra link at a time from a legacy multi-link file.
+	// Removing one link leaves every other community and credential untouched.
 	if err = atomicJSON(SettingsPath(root), settings); err != nil {
 		return nil, err
 	}

@@ -46,25 +46,25 @@ func TestQuerySelectsCommunitiesBeforeAnyTraffic(t *testing.T) {
 		}
 	}
 	connections := []Connection{{Alias: "doom", Service: a.URL, CommunityID: "doom"}, {Alias: "godzilla", Service: b.URL, CommunityID: "godzilla"}}
-	if err := SaveSettings(root, Settings{Mode: "external", Connections: connections}); err == nil {
-		t.Fatal("multiple links saved")
-	}
-	// Old multi-community files must not produce any combined traffic.
-	if err := atomicJSON(SettingsPath(root), Settings{Mode: "external", Connections: connections}); err != nil {
+	if err := SaveSettings(root, Settings{Mode: "external", Connections: connections}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Query(context.Background(), root, "fixture", "external", false, engine.Options{Communities: []string{"doom", "godzilla"}, Assistance: "off"}); err == nil {
-		t.Fatal("legacy combined retrieval allowed")
+	if _, err := Query(context.Background(), root, "fixture", "external", false, engine.Options{Communities: []string{"doom", "unknown"}, Assistance: "off"}); err == nil {
+		t.Fatal("unknown selection allowed")
 	}
 	if doom.Load() != 0 || godzilla.Load() != 0 {
 		t.Fatal("invalid selection caused traffic")
 	}
-	if err := SaveSettings(root, Settings{Mode: "external", Connections: connections[:1]}); err != nil {
-		t.Fatal(err)
-	}
-	out, err := Query(context.Background(), root, "fixture", "external", false, engine.Options{Assistance: "off"})
+	out, err := Query(context.Background(), root, "fixture", "external", false, engine.Options{Communities: []string{"doom", "doom"}, Assistance: "off"})
 	if err != nil || len(out.Hits) != 1 || out.Hits[0].CommunityID != "doom" || doom.Load() != 1 || godzilla.Load() != 0 {
-		t.Fatalf("single selection: %+v %v", out, err)
+		t.Fatalf("subset: %+v %v", out, err)
+	}
+	out, err = Query(context.Background(), root, "fixture", "external", false, engine.Options{Assistance: "off"})
+	if err != nil || len(out.Hits) != 2 || doom.Load() != 2 || godzilla.Load() != 1 {
+		t.Fatalf("all linked: %+v %v", out, err)
+	}
+	if _, err := Execute(context.Background(), root, Command{Action: "knowledge.upload"}); err == nil {
+		t.Fatal("ambiguous upload destination accepted")
 	}
 
 	if _, err := Execute(context.Background(), root, Command{Action: "query", Alias: "doom", Service: b.URL}); err == nil {

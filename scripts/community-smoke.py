@@ -147,6 +147,66 @@ def main():
                 other=next(v for v in fixtures if v[1]["id"]!=l["id"])
                 assert not owner.community("query",alias="fixture",data={"query":other[0].provider+"uniquemarker"})["hits"]
                 owner.tool("community",{"root":str(root),"action":"query","alias":"fixture","community":other[1]["id"],"data":{"query":"fixtureclock"}},error="conflicts")
+            # Both adapters exercise a multi-community project with independent keys.
+            # Duplicate knowledge is deliberately uploaded to two fixture communities.
+            first, second = fixtures
+            shared_id = next(line[4:] for line in (first[2]/".re-discipline/docs/clock.md").read_text().splitlines() if line.startswith("id: "))
+            for provider in ("claude", "codex"):
+                linked_root=base/(provider+"-linked");(linked_root/".re-discipline/docs").mkdir(parents=True)
+                linked=Adapter(provider,linked_root,args.service)
+                writer_root=base/(provider+"-multi-writer");(writer_root/".re-discipline/docs").mkdir(parents=True)
+                writer=Adapter(provider,writer_root,args.service)
+                marker=provider+"multilinkprobe"
+                text=finding(shared_id,marker,"shared original")
+                (linked_root/".re-discipline/docs/shared.md").write_text(text)
+                try:
+                    for alias,fixture in (("first",first),("second",second)):
+                        linked.community("connect",community=fixture[1]["id"],alias=alias)
+                        result=linked.community("knowledge.upload",alias=alias)
+                        assert result["complete"] and result["uploaded"]==1,result
+                    keys=linked.community("connections")["connections"]
+                    assert len({v["public_key"] for v in keys})==2,keys
+                    def query(sources="both", communities=None):
+                        payload={"root":str(linked_root),"query":marker,"sources":sources}
+                        if communities:payload["communities"]=communities
+                        return linked.tool("query",payload)
+                    deadline=time.monotonic()+30
+                    while True:
+                        out=query()
+                        if len(out["hits"])==1 and len(out["hits"][0].get("locations",[]))==3:break
+                        assert time.monotonic()<deadline,out
+                        time.sleep(.2)
+                    assert out["hits"][0]["source"]=="local",out
+                    writer.community("connect",community=second[1]["id"],alias="second")
+                    (writer_root/".re-discipline/docs/shared.md").write_text(finding(shared_id,marker,"remote correction"))
+                    assert writer.community("knowledge.upload",alias="second")["complete"]
+                    deadline=time.monotonic()+30
+                    while True:
+                        out=query()
+                        if len(out["hits"])==1 and out["hits"][0].get("resolution")=="remote_changed":break
+                        assert time.monotonic()<deadline,out
+                        time.sleep(.2)
+                    assert out["hits"][0]["source"]=="second" and len(out["hits"][0]["other_copies"])==2,out
+                    out=query("external")
+                    assert len(out["hits"])==1 and len(out["hits"][0]["variants"])==2,out
+                    for v in out["hits"][0]["variants"]:
+                        doc=linked.community("knowledge.get",alias=v["source"],data={"id":v["finding_id"]})
+                        assert doc["fingerprint"]==v["fingerprint"],doc
+                    grouped=linked.tool("community",{"root":str(linked_root),"action":"query","data":{"query":marker}})
+                    assert len(grouped["hits"])==1 and len(grouped["hits"][0]["variants"])==2,grouped
+                    subset=query("external",["first"])
+                    assert len(subset["hits"])==1 and subset["hits"][0]["community_id"]==first[1]["id"],subset
+                    linked.tool("community",{"root":str(linked_root),"action":"knowledge.upload"},error="select a community alias")
+                    linked.community("disconnect",alias="first")
+                    remaining=linked.community("connections")["connections"]
+                    assert len(remaining)==1 and remaining[0]["public_key"]==keys[1]["public_key"],remaining
+                    assert query("external")["hits"][0]["community_id"]==second[1]["id"]
+                finally:
+                    second[0].community("knowledge.delete",alias="fixture",data={"ids":[shared_id]})
+                    for adapter in (linked,writer):
+                        for conn in adapter.community("connections")["connections"]:
+                            adapter.community("disconnect",alias=conn["alias"])
+                print(provider+": independent multi-community keys, global reconciliation, variants, subset selection and isolated disconnect passed")
             for owner,l,root in fixtures:
                 delete_fixture(owner,l["id"],base/(owner.provider+".zst"))
                 assert (root/".re-discipline/docs/clock.md").exists()

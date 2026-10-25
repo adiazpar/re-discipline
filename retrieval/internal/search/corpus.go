@@ -84,7 +84,7 @@ func loadDocsContext(ctx context.Context, root string, metas []FileMeta) ([]Doc,
 		// Ordinary parsing/query hydration never hashes the document again.
 		if id, err := knowledge.FindingID(text); err == nil && id != "" {
 			d.FindingID = id
-			d.Fingerprint = knowledge.KnowledgeFingerprint(knowledge.ProjectPublication(text).Markdown)
+			d.Fingerprint = knowledge.KnowledgeFingerprint(knowledge.ProjectKnowledge(text).Markdown)
 		}
 		if d.Warning != "" {
 			warnings = append(warnings, m.Path+": "+d.Warning)

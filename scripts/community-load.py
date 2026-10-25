@@ -49,11 +49,14 @@ def main():
     command = docker + ['run', '--rm', '--memory', str(args.memory) + 'm', '--cpus', str(args.cpus), '--network', 're-discipline-' + installation['name'] + '_database']
     for name in ['TEST_DATABASE_URL', 'RUN_SEARCH_LOAD', 'LOAD_USERS', 'LOAD_DOCUMENTS', 'LOAD_REQUESTS', 'LOAD_ANCHORS', 'GOMEMLIMIT'] + (['MAX_ACTIVE_SEARCHES'] if args.workers else []):
         command += ['--env', name]
-    command += ['re-discipline-search-tests', '/community-tests', '-test.run=^TestRemoteSearchLoad$', '-test.v', '-test.timeout=15m']
+    command += ['re-discipline-search-tests', '/community-tests', '-test.run=^Test(RemoteSearchLoad|LinkedCommunitiesRetrievalUnderLoad)$', '-test.v', '-test.timeout=15m']
     process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     report = None
+    linked_report = None
     for line in process.stdout:
-        if line.startswith('LOAD_REPORT='):
+        if line.startswith('LINKED_LOAD_REPORT='):
+            linked_report = json.loads(line.split('=', 1)[1])
+        elif line.startswith('LOAD_REPORT='):
             report = json.loads(line.split('=', 1)[1])
         else:
             print(line, end='', flush=True)
@@ -61,11 +64,12 @@ def main():
     if report:
         report['container_limits'] = {'cpus': args.cpus, 'memory_mib': args.memory, 'go_memory_target_mib': args.memory * 3 // 4}
         report['test_exit_code'] = result
+        report['linked_retrieval'] = linked_report
         path = (args.report or state / 'search-load-report.json').resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2) + '\n')
         print('Load report:', path)
-    if result or not report:
+    if result or not report or not linked_report:
         raise SystemExit(result or 1)
 
 

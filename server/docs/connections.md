@@ -1,8 +1,8 @@
 # Project connections and key lifecycle
 
-A project is a local research folder with `.re-discipline/`. It links to one
-community on one server. Another project gets an independent connection, even
-when it links to the same community. A server can host many communities. There
+A project is a local research folder with `.re-discipline/`. It can link to multiple
+communities on one or several servers. Each link gets its own key. Another project
+gets independent connections, even when it links to the same communities. A server can host many communities. There
 are no human accounts, passwords, GitHub identities or machine registrations.
 A key identifies a connection, not a unique person; creating another identity is
 possible and is not treated as proof of a different human.
@@ -14,17 +14,19 @@ private seed in Windows Credential Manager, macOS Keychain or Linux Secret Servi
 Linux clients need an available, unlocked Secret Service keyring; there is no
 plaintext-file fallback. The server does not need a desktop credential store.
 Private keys are never sent over HTTP or written into project JSON, logs or Git.
-The keychain lookup is specific to the current project path and server. Copying a
+The keychain lookup is specific to the current project path, server and community. Existing single-link
+keys keep their original lookup; adding communities never replaces those keys. Copying a
 project configuration requires its own connection; it cannot delete the original
 project's key. Moving a project also requires reconnecting at the new path.
 
 `.re-discipline/community.json` stores the server origin, community UUID, local
 alias, public key and a nonsecret key reference. The public key lets an operator
 match the connection in `access.list` and revoke it even if its private key is
-lost; it cannot authorize requests by itself. Its `connections` array has at most one
-entry. Legacy multi-link configurations cannot run remote retrieval until extra
-links are disconnected. Normal source mode `both` combines local research with
-this one community. The project link never exposes a direct database connection.
+lost; it cannot authorize requests by itself. Its `connections` array contains one
+entry per linked server/community, with unique local aliases and separate keys.
+Normal source mode `both` combines local research with all linked communities;
+`external` searches all links and `local` sends no community requests. Explicit
+query subsets narrow that set. Disconnect removes only the selected link. The project link never exposes a direct database connection.
 
 Public joining registers the public key automatically. Private joining consumes
 an operator-issued invitation. `access.create` returns the random invitation

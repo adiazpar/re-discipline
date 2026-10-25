@@ -45,7 +45,7 @@ func migrateKnowledge(ctx context.Context, tx pgx.Tx) error {
 			if err = json.Unmarshal(r.data, &legacy); err != nil {
 				return err
 			}
-			text := kb.ProjectPublication(legacy.Markdown).Markdown
+			text := kb.ProjectKnowledge(legacy.Markdown).Markdown
 			if !strings.HasPrefix(text, "---\n") {
 				text = "---\nstatus: promoted\nkind: " + legacy.Kind + "\ngrade: " + legacy.Grade + "\nbuild: " + legacy.Build + "\n---\n" + text
 			}

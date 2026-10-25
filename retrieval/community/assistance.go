@@ -157,6 +157,9 @@ func Query(ctx context.Context, root, q, mode string, offline bool, opts engine.
 		if semantic.APIKey() == "" && !offline {
 			out.Assistance.Mode = "fallback"
 			out.Assistance.Reason = "TYPESAFE_API_KEY is not configured; baseline preserved."
+		} else if hasVariants(out.Hits) {
+			out.Assistance.Mode = "baseline_variants"
+			out.Assistance.Reason = "Differing community copies retain one grouped result; assistance cannot choose an authority."
 		} else if len(out.Warnings) > 0 {
 			out.Assistance.Mode = "fallback"
 			out.Assistance.Reason = "Source warnings require attention; baseline preserved."
@@ -264,4 +267,13 @@ func boundedEach(n int, f func(int)) {
 	}
 	close(jobs)
 	wg.Wait()
+}
+
+func hasVariants(hits []Result) bool {
+	for _, h := range hits {
+		if len(h.Variants) > 0 {
+			return true
+		}
+	}
+	return false
 }

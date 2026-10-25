@@ -1,8 +1,8 @@
 # Security boundaries
 
 Only the configured server operator creates communities, uploads/replaces current
-knowledge, removes it, archives it or controls read access. Readers use one
-community-scoped Ed25519 project key. Public communities allow explicit joining;
+knowledge, removes it, archives it or controls read access. Each reader link uses its own
+community-scoped Ed25519 project key. A project may hold several independent links. Public communities allow explicit joining;
 private ones require a single-use invitation. Public does not mean server-wide
 access. No GitHub account, contributor role or bearer reader token is accepted.
 

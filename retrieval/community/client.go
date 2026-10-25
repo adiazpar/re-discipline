@@ -165,13 +165,15 @@ func readOperation(action string) bool {
 }
 
 type Connection struct {
-	SourceNamespace string `json:"source_namespace,omitempty"`
-	KeyRef          string `json:"key_ref,omitempty"`
-	PublicKey       string `json:"public_key,omitempty"`
-	Alias           string `json:"alias"`
-	Service         string `json:"service"`
-	CommunityID     string `json:"community_id"`
-	Name            string `json:"name"`
+	// KeyScope is empty for existing single-link keys; new keys are community-scoped.
+	KeyScope    string `json:"key_scope,omitempty"`
+	Slug        string `json:"slug,omitempty"`
+	KeyRef      string `json:"key_ref,omitempty"`
+	PublicKey   string `json:"public_key,omitempty"`
+	Alias       string `json:"alias"`
+	Service     string `json:"service"`
+	CommunityID string `json:"community_id"`
+	Name        string `json:"name"`
 }
 type Settings struct {
 	Retrieval   string       `json:"retrieval"`
@@ -194,7 +196,7 @@ func LoadSettings(root string) (Settings, error) {
 	if err == nil {
 		for i := range s.Connections {
 			if s.Connections[i].KeyRef != "" {
-				s.Connections[i].KeyRef, err = connectionKeyRef(root, s.Connections[i].Service)
+				s.Connections[i].KeyRef, err = connectionKeyRef(root, s.Connections[i].Service, s.Connections[i].KeyScope)
 				if err != nil {
 					return s, err
 				}
@@ -210,11 +212,14 @@ func LoadSettings(root string) (Settings, error) {
 	if s.Retrieval == "" {
 		s.Retrieval = "remote"
 	}
+	if err == nil {
+		err = validateConnections(s.Connections)
+	}
 	return s, err
 }
 func SaveSettings(root string, s Settings) error {
-	if len(s.Connections) > 1 {
-		return fmt.Errorf("one project connects to one community; disconnect the existing community first")
+	if err := validateConnections(s.Connections); err != nil {
+		return err
 	}
 	if s.Mode != "local" && s.Mode != "external" && s.Mode != "both" {
 		return fmt.Errorf("mode must be local, external, or both")

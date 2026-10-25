@@ -47,7 +47,7 @@ func RemoteQuery(ctx context.Context, conn Connection, query string, opts engine
 	if err != nil {
 		return out, err
 	}
-	if _, ok := payload["compare_ids"]; !ok {
+	if _, ok := payload["compare_ids"]; !ok && len(opts.CompareIDs) > 0 {
 		out.Compared = nil
 		out.ComparisonComplete = false
 	}
@@ -96,6 +96,8 @@ func resultScopeMatches(hit Result, cid string) bool {
 }
 
 func remoteOrigin(hit *Result, conn Connection) {
+	hit.Variants = nil
+	hit.MetadataOnly = false
 	hit.OtherCopies = nil
 	hit.Resolution = ""
 	hit.ContentDiffers = false

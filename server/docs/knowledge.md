@@ -24,3 +24,9 @@ Fingerprint format 2 excludes curation timestamps. The upgrade rehashes current
 documents in bounded batches and rebuilds derived indexes, preserving text, UUIDs,
 server generations and stored dates. Finish or cancel any active archive before
 this upgrade: its frozen snapshot cannot be changed mid-export.
+
+Projects can query multiple explicitly linked communities through the plugin. Each
+server operation still addresses one community UUID with one scoped credential.
+Cross-source deduplication and variant grouping run in the client; see the
+[retrieval policy](../../skills/community/references/retrieval.md). Upload targets
+remain explicit, and linking a community never automatically uploads to it.

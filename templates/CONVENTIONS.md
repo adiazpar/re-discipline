@@ -3,9 +3,9 @@
 This project curates hard facts about the software under analysis in
 `.re-discipline/`. Any agent that can read files and run a command can
 use it. The recovery path for every problem here is "edit a text file"
-or "delete and rebuild" for search indexes. Publication receipts are provenance:
-retain `.re-discipline/community/` when moving a workspace so retry identities
-and verified local/community relationships survive.
+or "delete and rebuild" for search indexes. Stable finding UUIDs live in Markdown. The disposable index keeps upload and
+last-matching-fingerprint bookkeeping; no publication-receipt directory is needed.
+Community links live in `community.json`, and private keys stay in the OS store.
 
 CLI examples use `re-search`; on Windows use `re-search.exe`.
 
@@ -165,5 +165,5 @@ it. Dates use UTC RFC3339; never manually make a date newer to change retrieval
 priority. Legacy findings get their first recorded date when maintained. Upload
 also maintains these fields. Plain editor changes get their date at the next
 curation/upload action; queries still detect changed content automatically.
-The fingerprint and one last matching remote fingerprint live in the existing
-disposable index, not in frontmatter. No historical document versions are stored.
+The fingerprint and one last matching fingerprint per community link live in the
+existing disposable index, not in frontmatter. No historical document versions are stored.

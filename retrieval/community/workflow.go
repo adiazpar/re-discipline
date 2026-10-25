@@ -15,6 +15,8 @@ var regexpAlias = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 type Result struct {
+	Variants           []Result   `json:"variants,omitempty"`
+	MetadataOnly       bool       `json:"metadata_only,omitempty"`
 	OtherCopies        []Location `json:"other_copies,omitempty"`
 	CreatedAt          string     `json:"created_at,omitempty"`
 	KnowledgeUpdatedAt string     `json:"knowledge_updated_at,omitempty"`
@@ -86,46 +88,75 @@ func queryCandidates(ctx context.Context, root, q, mode string, offline bool, op
 			out.Hits = append(out.Hits, Result{Source: "local", Path: h.Path, FindingID: h.FindingID, Fingerprint: h.Fingerprint, Title: h.Title, Snippet: h.Snippet, Kind: h.Kind, Grade: h.Grade, Status: h.Status, Build: h.Build, TextDigest: h.TextDigest, CreatedAt: h.CreatedAt, KnowledgeUpdatedAt: h.KnowledgeUpdatedAt})
 		}
 	}
-	if mode != "local" {
-		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		if mode == "both" {
-			seen := map[string]bool{}
-			for _, h := range out.Hits {
-				if validCopyIdentity(h) && !seen[h.FindingID] {
-					opts.CompareIDs = append(opts.CompareIDs, h.FindingID)
-					seen[h.FindingID] = true
-				}
-			}
-		}
-		var remoteResults []remoteResult
-		if !offline {
-			remoteResults = remoteQueries(ctx, s.Connections, q, opts)
-		}
-		for i, conn := range s.Connections {
-			source := map[string]any{"source": conn.Alias, "retrieval": "remote", "cached": false, "available": false}
-			if offline {
-				out.Warnings = append(out.Warnings, conn.Alias+": remote community unavailable offline")
-			} else {
-				remote, e := remoteResults[i].result, remoteResults[i].err
-				if e != nil {
-					out.Warnings = append(out.Warnings, conn.Alias+": "+e.Error())
-				} else {
-					source["available"] = true
-					if mode == "both" {
-						out.Hits, e = reconcileCopies(ctx, root, conn, out.Hits, remote)
-						if e != nil {
-							return out, e
-						}
-					} else {
-						out.Hits = append(out.Hits, remote.Hits...)
-					}
-					out.Warnings = append(out.Warnings, remote.Warnings...)
-				}
-			}
-			out.Sources = append(out.Sources, source)
+	if mode == "local" {
+		out.Hits, err = collapseCopies(root, out.Hits, 128)
+		return out, err
+	}
+	remoteCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	opts.CompareIDs = candidateIdentityIDs(out.Hits)
+	remoteResults := make([]remoteResult, len(s.Connections))
+	if !offline {
+		remoteResults = remoteQueries(remoteCtx, s.Connections, q, opts)
+	}
+	candidates := append([]Result{}, out.Hits...)
+	for _, r := range remoteResults {
+		if r.err == nil {
+			candidates = append(candidates, r.result.Hits...)
 		}
 	}
-	out.Hits, err = collapseCopies(root, interleaveSources(out.Hits), 128)
+	// Bound the reconciliation window by unique findings, not duplicate copies.
+	candidates = candidateWindow(interleaveSources(candidates), 128)
+	ids := candidateIdentityIDs(candidates)
+	if !offline && len(s.Connections) > 1 {
+		completeComparisons(remoteCtx, s.Connections, remoteResults, q, opts, ids)
+	}
+	for i, conn := range s.Connections {
+		source := map[string]any{"source": conn.Alias, "retrieval": "remote", "cached": false, "available": false}
+		if offline {
+			remoteResults[i].err = fmt.Errorf("remote community unavailable offline")
+		}
+		if e := remoteResults[i].err; e != nil {
+			out.Warnings = append(out.Warnings, conn.Alias+": "+e.Error())
+		} else {
+			source["available"] = true
+			source["comparison_complete"] = remoteResults[i].result.ComparisonComplete
+			out.Warnings = append(out.Warnings, remoteResults[i].result.Warnings...)
+		}
+		out.Sources = append(out.Sources, source)
+	}
+	// Use the parent context for local bookkeeping: a slow host must not erase
+	// successful responses by expiring the shared network deadline.
+	out.Hits, err = reconcileSources(ctx, root, candidates, out.Hits, s.Connections, remoteResults, mode == "both")
 	return out, err
+}
+
+func candidateIdentityIDs(hits []Result) []string {
+	ids, seen := []string{}, map[string]bool{}
+	for _, h := range hits {
+		if validCopyIdentity(h) && !seen[h.FindingID] {
+			ids = append(ids, h.FindingID)
+			seen[h.FindingID] = true
+		}
+	}
+	return ids
+}
+
+func candidateWindow(hits []Result, limit int) []Result {
+	out, seen := []Result{}, map[string]bool{}
+	for _, h := range hits {
+		key := h.Source + "\x00" + h.Path + "\x00" + h.FindingID
+		if validCopyIdentity(h) {
+			key = h.FindingID
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, h)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
 }

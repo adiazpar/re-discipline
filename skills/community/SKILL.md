@@ -38,15 +38,16 @@ enforces human participation because the operator's credential alone cannot prov
 who approved a call. Clearly scoped automated tests may exercise the protocol on
 disposable fixtures; this exception never applies to an existing real community.
 
-One local research project (`.re-discipline/`) connects to one community. Other
-projects may connect to other communities on any operator's server. For public
+One local research project (`.re-discipline/`) can link multiple communities,
+including communities on different operators' servers. Linking opts that community
+into the default remote search set; an explicit query subset narrows it. For public
 access call `connect` with `service`, `community` (UUID or slug), and optional
 local `alias`. For private access, the operator creates a single-use invitation
 with `access.create`; pass it in `connect` data as `invitation`. An invitation may
 be shared only when the user explicitly requests delivery. Never send operator
 credentials. `access.list` and `access.revoke` are operator-only.
 
-The plugin creates a project key in the OS credential store and sends only its
+The plugin creates a separate key for each project/community link in the OS credential store and sends only its
 public key. Signing, replay protection and renewals are automatic. Linux clients
 need an unlocked Secret Service keyring; never substitute plaintext key files.
 An available OS key store is required for remote access, not local retrieval.
@@ -55,9 +56,16 @@ Do not put private keys or invitations in project files, Git or logs.
 `.re-discipline/community.json` stores the service, community UUID, alias and a
 public key and nonsecret local key reference. If a key is compromised, have the
 operator match its public key in `access.list` and revoke that connection. Connecting changes source mode from `local` to
-`both` (local research plus that remote community). `mode.set` also supports
-`external`. A second link is rejected; disconnect before changing communities.
-Legacy multi-link projects must disconnect extra links before remote retrieval.
+`both` (local research plus all linked communities). `external` searches all linked
+communities; `local` makes no community requests. Alias names must be unique, and
+the same server/community cannot be linked twice. Existing single-link keys remain
+valid. Disconnecting one alias leaves the other links and keys intact.
+
+Read [retrieval reconciliation](references/retrieval.md) for copy selection. Exact
+copies share one result and their source locations. Unordered remote differences
+appear in one result's `variants`; keep those claims separate and cite their
+community. Use a variant's `source` alias and finding UUID for `knowledge.get`.
+Never treat a timestamp, duplicate count or optional relevance score as authority.
 
 `disconnect` asks the server to remove access, deletes the local private key and
 removes the link. If offline, it reports that server removal could not be confirmed.
@@ -77,7 +85,7 @@ Searches and document reads share the server's fair queue. Ordinary readers must
 never download a corpus. The owner-only deletion archive is the explicit exception.
 Never use a legacy offline cache,
 or suggest synchronization. Old sync settings are interpreted as remote. During
-an outage, report the unavailable community and retain any successful local results. Do not silently fall back to old community content.
+an outage, report the unavailable community and retain successful results from other communities and the local project. Do not silently fall back to old community content.
 
 Operators can inspect the shared resource budget and queue through `server.stats`.
 Authenticated reads use available capacity without a fixed minute quota. The
@@ -90,7 +98,10 @@ to bypass contention, broaden the query to other communities or
 claim an empty result means no evidence when the service was unavailable.
 
 For owner uploads, read [upload.md](references/upload.md). `knowledge.upload`
-handles one file, selected folders, or the whole local curated KB. It assigns
+handles one file, selected folders, or the whole local curated KB. With multiple
+links, supply the chosen alias. Linking never grants upload authority or
+automatically broadcasts uploads; repeat the operation for explicitly chosen
+destinations. It assigns
 missing stable IDs, removes Evidence from the transmitted copy, compares hashes,
 and sends changed documents in bounded batches. Changed owner content replaces
 the server copy automatically. No draft, review, revision or contributor workflow

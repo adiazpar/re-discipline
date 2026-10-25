@@ -79,7 +79,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 		case "tools/list":
 			resp.Result = map[string]any{"tools": []map[string]any{{
 				"name":        "query",
-				"description": "Search local knowledge and configured community sources through one ranked query. Supply the active project root so plugin launch directories cannot select another workspace. Search here before investigating.",
+				"description": "Search local knowledge and configured community sources through one ranked query. Supply the active project root so plugin launch directories cannot select another workspace. Search here before investigating. Differing remote copies can return one finding with source-labelled variants; read a variant through its community alias.",
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -89,7 +89,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 						"kind":        map[string]any{"type": "string", "description": "only docs of this kind (fact|ops|reference); omit for all"},
 						"grade":       map[string]any{"type": "string", "description": "only docs of this grade (direct|inferred|reported); omit for all"},
 						"sources":     map[string]any{"type": "string", "enum": []string{"local", "external", "both"}},
-						"communities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional alias of this project's one connected community. Extra or unknown connections are rejected."},
+						"communities": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional subset of linked community aliases. Omit to search all linked communities; unknown aliases are rejected before network access."},
 						"offline":     map[string]any{"type": "boolean", "description": "Disable remote community requests; local project retrieval remains available"},
 					},
 					"required": []string{"query"},

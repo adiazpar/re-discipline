@@ -188,33 +188,35 @@ requirement is only for development, not plugin installation. It checks native
 project-binary installation/refresh, the CLI, both MCP adapters, fixture corpus,
 and session hooks in temporary directories. CI also installs the reference
 Claude/Codex versions through their real marketplace commands. Running
-`scripts/smoke.py --hosts` checks Claude MCP startup, Codex's ten installed
+`scripts/smoke.py --hosts` checks Claude MCP startup, Codex's installed
 skills, and all three corpus queries through Codex's own MCP connection.
 
-CI is configured to test Windows x64, both Mac architectures, and both Linux
-architectures. Verification performed on 2026-10-23:
+The [native CI matrix](.github/workflows/ci.yml) runs the full retrieval Go suite,
+vet, reproducible native-artifact checks, both real marketplace installations,
+host discovery, MCP golden-corpus queries and hooks on five native runners:
+Windows x64, macOS ARM64, macOS Intel, Linux ARM64 and Linux x64.
+The [server CI](.github/workflows/server.yml) runs PostgreSQL integration and race
+tests plus both adapters against a live server and a real Linux Secret Service.
+[Native CI runs](https://github.com/adiazpar/re-discipline/actions/workflows/ci.yml)
+and [server CI runs](https://github.com/adiazpar/re-discipline/actions/workflows/server.yml)
+show the tested commit and outcome; cross-compilation alone is not a runtime test.
 
-| Environment | Verified |
-| --- | --- |
-| macOS ARM64 | Claude Code 2.1.291 connection; Codex CLI 0.164.0 discovery of 10 skills and 3/3 corpus answers through the installed plugin; native install, both adapters, and hooks; Go race tests and vet. Codex desktop runtime 0.163.0-alpha.11.2 also verified |
-| macOS x64 through Rosetta on Apple Silicon | Actual Intel binaries for Claude Code 2.1.291, Codex CLI 0.164.0, and re-search; same packaging and host checks, including 3/3 corpus answers through Codex |
-| Linux ARM64, fresh Ubuntu 24.04 OrbStack machine | Both marketplace installations, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers; native install, both adapters, hooks, and CLI bench |
-| Linux x64, fresh Ubuntu 24.04 OrbStack machine | Same checks under CPU emulation |
-| Windows 11 ARM64, disposable UTM VM | Actual ARM64 and x64 builds of Claude Code 2.1.291 and Codex CLI 0.164.0, with the bundled x64 engine under Windows emulation; marketplace installation, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers; engine refresh, both adapters, and hook commands passed |
-| All five build targets | Pinned builds and byte-for-byte rebuild comparison |
-| Native GitHub Actions runners: Windows x64, macOS ARM64/x64, Linux ARM64/x64 | [All five jobs passed](https://github.com/adiazpar/re-discipline/actions/runs/40023056384): Go tests and vet, reproducible native artifacts, both marketplace installations, Claude MCP connection, Codex's 10 skills and 3/3 corpus answers, both adapters, and hook commands |
+Local verification on 2026-10-25 covered macOS ARM64 and Intel binaries through
+Rosetta, Linux ARM64 and x64 through OrbStack, the current six skills, and both
+Claude/Codex adapters. The updated multi-community smoke exercises actual uploads,
+scoped keys, global reconciliation, variants, subset selection, isolated disconnect
+and knowledge-only archiving. See [load and accuracy testing](server/docs/load-testing.md).
 
-OrbStack supports [Linux machines](https://docs.orbstack.dev/architecture),
-not Windows or macOS guests. The Intel Mac checks above use Rosetta on macOS;
-they are not a run on Intel hardware. The Windows checks used a temporary
-Windows setup account, without completing personal account onboarding; x64
-programs ran under Windows ARM emulation. Native Windows x64 and Intel Mac
-checks also passed on the corresponding GitHub Actions runners linked above.
+OrbStack supplies Linux guests. Intel Mac execution here uses Rosetta on macOS;
+Windows and physical Intel Mac runtime coverage come from the native CI runners.
+A disposable Windows 11 ARM64/UTM VM was also tested earlier in development and
+removed afterward. Those earlier VM results are not a substitute for current CI.
 
-The bundled corpus has five documents and three golden questions. These checks
-establish packaging and fixture behavior; they are not a large-corpus quality
-evaluation. Host checks exercise plugin discovery and MCP execution without
-spending model tokens; they do not simulate a complete agent-led research session.
+The bundled corpus has five documents and three golden questions. Host checks
+exercise plugin discovery and MCP execution without spending model tokens; they
+do not simulate a complete agent-led research session. The load tests use larger
+synthetic corpora and verify exact content, but do not establish retrieval quality
+for every real-world corpus.
 
 </details>
 
@@ -287,8 +289,8 @@ Every community starts private. The operator may make it public afterward:
 - **Private:** the operator issues a single-use invitation for that community.
   Making a public community private revokes its public connections.
 
-No accounts, passwords or GitHub linking are required. Each project has its own
-key pair for one community. Private keys stay in the operating system credential
+No accounts, passwords or GitHub linking are required. Each project/community link has its own
+key pair. Private keys stay in the operating system credential
 store; the server stores public keys. Only the operator can list all hosted
 communities, issue invitations or revoke connections.
 
@@ -324,8 +326,9 @@ it while retaining data. `up --setup-only` exposes health checks only.
 ### Connect and search
 
 A project is your local research folder containing `.re-discipline/`. It connects
-to **one community**. Other projects can connect independently to communities on
-the same server or another operator's server.
+to **multiple communities**, on the same server or different operators' servers.
+Each link has its own community-scoped key and unique local alias. Linking a
+community opts it into the project's default remote search set.
 
 For a public community, ask the agent to connect this project to its server URL
 and community UUID or slug. For a private community, the operator creates an
@@ -340,11 +343,14 @@ the plugin reports an unavailable store instead of saving an unencrypted key.
 The hosted server itself needs no desktop keyring.
 
 Connecting changes local-only source mode to `both`: local research plus this
-project's remote community. Use `local` or `external` to search only that source.
+project's linked communities. `external` searches all linked communities; `local`
+searches only the local project. The query tool's `communities` array (CLI
+`--communities doom,godzilla`) optionally narrows the linked set.
 The server verifies signed requests, enforces community scope and rejects replays.
 HTTPS is required outside localhost. There is no repeated login prompt.
 
-`disconnect` removes the server connection and deletes the local key. If offline,
+`disconnect` removes the selected server connection and deletes only its local
+key. Other linked communities remain usable. If offline,
 it deletes the local key and reports that remote removal could not be confirmed.
 Requests renew access automatically, at most once daily. A connection unused for
 180 days expires and is pruned, including when someone manually deletes their key.
@@ -355,7 +361,7 @@ are created. See [connection security and lifecycle](server/docs/connections.md)
 Community retrieval is remote-only. There is no sync mode, corpus cache or offline
 fallback. Legacy sync settings are interpreted as remote; old downloaded files
 are never searched. An unavailable community is reported as unavailable while
-successful local results remain usable. Ordinary local
+successful results from other communities and the local project remain usable. Ordinary local
 project retrieval still works offline.
 
 Use `/re-discipline:community` for hosting, connections, uploads, community
@@ -363,7 +369,9 @@ management and read access. The old publish and review skills are retired.
 
 ### Upload owner knowledge
 
-Ask the agent to upload the curated KB or selected files. `knowledge.upload`
+Ask the agent to upload the curated KB or selected files to a chosen community.
+With multiple links, `knowledge.upload` and `knowledge.status` require its alias;
+linking never automatically broadcasts uploads. `knowledge.upload`
 automatically assigns missing stable finding IDs, excludes Evidence, compares
 fingerprints and sends only new or changed files in bounded batches. A changed
 owner finding replaces its server copy; the latest successful upload wins.
@@ -553,21 +561,26 @@ bounded incremental indexing. Search quietly returns the content currently index
 new uploads appear as indexing catches up. Snippets and fingerprints remain
 consistent within each result.
 
-In `both` mode, retrieval selects one copy per finding **before ranking**:
+Retrieval gathers candidates from the selected communities, then reconciles each
+finding UUID across all sources **before ranking**. In `both` mode this includes
+curated local copies. Exact UUID/fingerprint matches collapse to one result with
+all source locations and no extra ranking votes. Different UUIDs remain distinct.
 
-| Compared with the last matching fingerprint | Result |
-| --- | --- |
-| Local and community content match | One result with both locations; local read surface |
-| Only local knowledge changed | Local copy |
-| Only community knowledge changed | Community copy |
-| Both changed, or no matching baseline exists | Local curated copy |
+A last-matching fingerprint is kept separately for each community link. An
+unambiguous local or remote change selects the updated copy. Competing changes or
+unknown lineage prefer the curated local copy. Without a local copy, differing
+remote versions form one result with explicit source-labelled `variants`, each
+with its own fingerprint and read location. No variant is silently declared true.
+Optional query assistance retains ordinary ordering when variants are unresolved.
 
-Different copies carry `content_differs`, a `resolution` reason and alternate
-location metadata; the losing text never contributes a second result or ranking
-vote. This also applies when the corrected copy no longer matches the query:
-the obsolete match is omitted. The plugin looks up only candidate identities in
-the local index and sends a bounded list of IDs in the same remote search request.
-There are no extra document downloads or synchronization.
+Losing copies carry metadata in `other_copies`, never an extra ranking vote.
+If a selected correction no longer matches the query, the obsolete match is
+omitted. Queries compare at most 128 candidate identities. When another community
+introduces an identity not yet checked, one additional comparison query per source
+retrieves bounded metadata and replaces that source's entire result snapshot.
+This adds no corpus synchronization or full-document downloads. A failed source
+is reported, and successful sources remain usable. Ordinary indexing lag is silent.
+See [reconciliation rules and limits](skills/community/references/retrieval.md).
 
 Curation and upload maintain `created_at` and `knowledge_updated_at` in finding
 frontmatter. Evidence-only edits preserve the knowledge date; IDs, dates, Evidence
@@ -581,7 +594,7 @@ finding/connection, alongside upload and timestamp bookkeeping. An upload receip
 also establishes a match. Server sequence metadata prevents a delayed index or
 response from undoing that acknowledgement. Rebuilds preserve this bookkeeping;
 cache deletion safely falls back to the local curated copy. No document history
-is stored. `local` and `external` modes remain restricted to their selected source.
+is stored. `local` remains local-only; `external` reconciles only the selected remote communities.
 
 ## Claims and optional assistance
 

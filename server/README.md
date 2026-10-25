@@ -47,7 +47,7 @@ sessions are safely cancelled during this format migration; start a new preview.
 
 Only the operator can create or change communities and upload documents. Public
 `community.connect` registers a project's public key; private joining consumes a
-single-use invitation from `access.create`. Each project links one community.
+single-use invitation from `access.create`. A project can link multiple communities, using a separate key for each link.
 Client private keys stay in the OS credential store. Signed HTTPS requests bind
 the method, exact public origin/path and body, with freshness and atomic replay
 checks. The operator's separate credential remains in host secret storage.
