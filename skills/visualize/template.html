@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>How this knowledge base is searched</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -272,8 +273,7 @@ footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--rule-soft);
     <div><div class="s-num"><i>01</i><div>
       <h3>Take the document apart</h3>
       <p>Frontmatter, title and body are separated and stored as different things. The title is not
-      merely the first line of the body &mdash; it becomes its own column, and it will be weighted
-      heaviest.</p>
+      merely the first line of the body &mdash; it becomes its own column, with its own weight.</p>
       <p>Relations bullets are stripped before indexing. A cross-reference list would make every
       document searchable by its neighbours' topics.</p>
     </div></div></div>
@@ -539,8 +539,8 @@ document.getElementById('columns').innerHTML =
 set('q-concept', DATA.traces.concept.question);
 set('q-ident', DATA.traces.ident.question);
 html('ratio', refs && facts
-  ? 'Reference entries outnumber curated facts ' + (refs / facts).toFixed(1).replace(/\.0$/, '')
-    + ' to one. Their short, keyword-dense text can crowd out relevant findings.'
+  ? 'There are ' + (refs / facts).toFixed(1).replace(/\.0$/, '')
+    + ' reference entries per curated fact. Their short, keyword-dense text can crowd out relevant findings.'
   : 'Field matching and a reference preference supplement BM25 relevance.');
 set('penline', penaltyRule + ' added to its score');
 set('foot', 'Traced from this project’s index · column weights '
@@ -594,7 +594,7 @@ function render() {
 function place() {
   const rs = Array.prototype.slice.call(board.querySelectorAll('.row'));
   board.style.height = (rs.length * ROW + PAD * 2) + 'px';
-  const worst = Math.max.apply(null, rs.flatMap(e => [Math.abs(e._d.raw), Math.abs(e._d.final)]).concat([1]));
+  const worst = Math.max.apply(null, rs.flatMap(e => [-e._d.raw, -e._d.final]).concat([1]));
   rs.slice().sort((a, b) => applied ? a._d.final_rank - b._d.final_rank : a._d.raw_rank - b._d.raw_rank)
     .forEach((el, i) => {
       el.style.transform = 'translateY(' + (PAD + i * ROW) + 'px)';
@@ -603,7 +603,7 @@ function place() {
       const s = applied ? el._d.final : el._d.raw;
       el.querySelector('.rank').textContent = rank;
       el.querySelector('.sc').textContent = s.toFixed(2);
-      el.querySelector('.fill').style.width = (Math.abs(s) / worst * 100) + '%';
+      el.querySelector('.fill').style.width = (Math.max(0, -s) / worst * 100) + '%';
     });
   board._cut.style.transform = 'translateY(' + (PAD + R.default_limit * ROW) + 'px)';
   board.classList.toggle('applied', applied);
