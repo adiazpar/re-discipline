@@ -9,6 +9,7 @@ Uploads require the destination server's operator credential.
 | Purpose | Action and arguments |
 |---|---|
 | Health | `server.ping`, `service` (no credential required) |
+| Managed update check/retry | `server.update`, `service` (operator registration and deployment access; compatible updates only) |
 | Local settings | `status`, `connections`, `mode.set` with mode `local`, `both`, or `external` |
 | Link | `connect`, service and community UUID/slug, optional alias; private joining adds `data:{invitation}` |
 | Unlink | `disconnect`, alias; removes access and local key, reports offline failures |

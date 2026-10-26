@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.10.0 (unreleased)
+## 1.11.0 - 2026-10-26
+
+Includes the accumulated 1.10.0 development changes; 1.10.0 had no release tag.
+
+- Refresh existing project engines automatically at session start or first tool use, with atomic replacement, integrity checks and protection against older sessions downgrading a newer release.
+- Apply compatible managed server upgrades on operator management use, using bundled Linux binaries, exact build checks, serialized deployment and executable rollback. Register rented-host deployment access over SSH; reader traffic never deploys software. Schema and major-version upgrades remain explicit maintenance.
+- Reduce retrieval SQL work and tolerate brief index contention while preserving ranked responses. Validate scoped query/full-document results under concurrent readers and uploads.
 
 - Bundle native Windows x64, macOS Intel/Apple Silicon and Linux x64/ARM64 engines. Share one marketplace catalog across Claude and Codex with small provider-specific MCP/hook adapters and no Windows Bash requirement. Automatically install and refresh project binaries; test real marketplace discovery, MCP adapters, hooks and a golden corpus on all five native CI targets.
 - Bundle the optional operator-hosted server in `server/`, importing the same retrieval engine. Remove the separate service repository dependency, central endpoint, OAuth/account linking, browser dashboard and corpus synchronization workflows. Provide repeatable local Docker/OrbStack installation and credential-free health checks.

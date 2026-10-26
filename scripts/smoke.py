@@ -181,11 +181,44 @@ def main():
 
         golden = [json.loads(line) for line in
                   (project / ".re-discipline/golden.jsonl").read_text().splitlines() if line]
+        if os.name == "nt":
+            # An unsigned PE still executes with trailing bytes. Hold this stale
+            # project copy open while the bundled MCP engine serves eight queries.
+            local_binary.write_bytes(artifact.read_bytes() + b"stale fixture")
+            running = subprocess.Popen([str(local_binary), "serve", "--mcp"], cwd=work,
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL, text=True)
+            try:
+                running.stdin.write(json.dumps(rpc(1, "initialize", {"protocolVersion": "2024-11-05"})) + "\n")
+                running.stdin.flush()
+                assert json.loads(running.stdout.readline())["result"]["serverInfo"]
+                requests = [rpc(1, "initialize", {"protocolVersion": "2024-11-05"})]
+                requests += [rpc(i + 2, "tools/call", {"name": "query", "arguments": {
+                    "root": str(project), "query": golden[0]["q"], "sources": "local", "limit": 1}}) for i in range(8)]
+                started = time.monotonic()
+                result = run([str(binary), "serve", "--mcp"], cwd=work,
+                             input="".join(json.dumps(req) + "\n" for req in requests))
+                assert time.monotonic() - started < 10, "locked project copy delayed every query"
+                responses = [json.loads(line) for line in result.stdout.splitlines()]
+                assert len(responses) == 9
+                for response in responses[1:]:
+                    answer = json.loads(response["result"]["content"][0]["text"])
+                    assert answer["hits"][0]["path"] == golden[0]["expect"], answer
+                assert "refresh deferred" in result.stderr, "fixture did not hold the executable lock"
+            finally:
+                running.communicate(timeout=10)
+            run([str(binary), "serve", "--mcp"], cwd=work,
+                input="".join(json.dumps(req) + "\n" for req in requests[:2]))
+            assert local_binary.read_bytes() == artifact.read_bytes(), "new session did not recover after unlock"
+            print("Windows locked project copy: eight accurate queries during deferred refresh, then recovery passed")
         for provider in ["claude", "codex"]:
+            local_binary.write_bytes(b"stale before MCP")
             manifest = json.loads((plugin / f".{provider}-plugin/plugin.json").read_text())
             config = json.loads((plugin / manifest["mcpServers"]).read_text())["mcpServers"]["re-search"]
             command = config["command"].replace("${CLAUDE_PLUGIN_ROOT}", str(plugin))
             cwd = plugin / config["cwd"] if "cwd" in config else work
+            unrelated = cwd / ".re-discipline"
+            unrelated.mkdir(exist_ok=True)
             # Resolve relative executable paths against the configured child cwd,
             # as Codex does; Python/Windows otherwise uses its parent cwd.
             if not Path(command).is_absolute():
@@ -207,7 +240,9 @@ def main():
             for response, case in zip(responses[2:], golden):
                 answer = json.loads(response["result"]["content"][0]["text"])
                 assert answer["hits"][0]["path"] == case["expect"], (provider, case, answer)
-            print(f"{provider} MCP adapter: handshake, 3 tools, {len(golden)}/{len(golden)} golden answers at rank 1")
+            assert local_binary.read_bytes() == artifact.read_bytes(), "MCP did not refresh the project engine"
+            assert not (unrelated / "bin").exists(), "MCP refreshed the cwd project instead of only the requested root"
+            print(f"{provider} MCP adapter: automatic refresh, handshake, 3 tools, {len(golden)}/{len(golden)} golden answers at rank 1")
             if args.service:
                 result = responses[-1]["result"]
                 assert not result.get("isError"), result
@@ -219,8 +254,10 @@ def main():
         hook_input = json.dumps({"cwd": str(project)})
         claude_hook = json.loads((plugin / ".claude-plugin/hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
         hook_command = claude_hook["command"].replace("${CLAUDE_PLUGIN_ROOT}", str(plugin))
+        local_binary.write_bytes(b"stale before hook")
         result = run([engine_command(hook_command), *claude_hook["args"]], input=hook_input, cwd=work, env=env)
         assert "docs curated." in result.stdout, result.stdout
+        assert local_binary.read_bytes() == artifact.read_bytes(), "Claude hook did not refresh the engine"
         codex_hook = json.loads((plugin / ".codex-plugin/hooks.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
         shells = [["/bin/sh", "-c", codex_hook["command"]]]
         if os.name == "nt":
@@ -231,9 +268,11 @@ def main():
             assert "docs curated." in result.stdout, result.stdout
             shells = [["powershell.exe", "-NoProfile", "-Command", codex_hook["commandWindows"]]]
         for shell in shells:
+            local_binary.write_bytes(b"stale before Codex hook")
             result = run(shell, input=hook_input, cwd=work, env=env)
             assert "docs curated." in result.stdout, result.stdout
-        print("Claude exec hook and Codex shell hook: workspace summary passed")
+            assert local_binary.read_bytes() == artifact.read_bytes(), "Codex hook did not refresh the engine"
+        print("Claude exec hook and Codex shell hook: automatic refresh and workspace summary passed")
 
         if args.hosts:
             # CI installs both hosts and this marketplace before this check.

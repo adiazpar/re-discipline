@@ -4,17 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 	"io"
 	"net/http"
 	"time"
 )
 
 type ServerHealth struct {
-	Service          string `json:"service"`
-	OK               bool   `json:"ok"`
-	Protocol         int    `json:"protocol"`
-	Mode             string `json:"mode,omitempty"`
-	CommunityEnabled *bool  `json:"community_enabled,omitempty"`
+	Service          string         `json:"service"`
+	OK               bool           `json:"ok"`
+	Protocol         int            `json:"protocol"`
+	Mode             string         `json:"mode,omitempty"`
+	CommunityEnabled *bool          `json:"community_enabled,omitempty"`
+	Software         buildinfo.Info `json:"software"`
 }
 
 // Ping sends no credentials or local project data, and never follows redirects.

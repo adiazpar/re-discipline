@@ -28,8 +28,10 @@ func main() {
 }
 
 func run(args []string) error {
+	community.OperatorUpdate = updateOperator
+	community.PrepareProject = refreshProject
 	if len(args) > 0 && args[0] == "session-start" {
-		// The optional hook is read-only and must never prevent a session.
+		// A best-effort engine refresh must never prevent a session.
 		writeSessionStatus(os.Stdin, os.Stdout)
 		return nil
 	}
@@ -66,7 +68,12 @@ func run(args []string) error {
 		}
 	}
 
-	resolveRoot := func() (string, error) {
+	resolveRoot := func() (root string, err error) {
+		defer func() {
+			if err == nil && cmd != "install-binary" && cmd != "serve" && cmd != "community" {
+				refreshProject(root)
+			}
+		}()
 		if *rootFlag != "" {
 			absolute, err := filepath.Abs(*rootFlag)
 			if err != nil {
@@ -254,6 +261,7 @@ func run(args []string) error {
 			if err != nil {
 				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
 			}
+			refreshProject(root)
 			result, e := community.Query(context.Background(), root, q, opts.Sources, opts.Offline, opts)
 			if e != nil {
 				return "", e
@@ -272,6 +280,7 @@ func run(args []string) error {
 			if err != nil {
 				return "no .re-discipline directory found in this project — run the init-project skill to set one up", nil
 			}
+			refreshProject(root)
 			res, _, sErr := search.LookupSymbol(root, name, limit)
 			if sErr != nil {
 				return "", sErr
@@ -299,12 +308,15 @@ func run(args []string) error {
 				if err != nil {
 					return nil, err
 				}
+				refreshProject(root)
 				return community.Query(context.Background(), root, q, opts.Sources, opts.Offline, opts)
 			}, func(name string, limit int) (search.SymbolHits, error) {
 				root, err := resolveRoot()
 				if err != nil {
 					return search.SymbolHits{}, err
 				}
+				refreshProject(root)
+				refreshProject(root)
 				res, _, sErr := search.LookupSymbol(root, name, limit)
 				return res, sErr
 			})

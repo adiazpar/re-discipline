@@ -25,7 +25,25 @@ type Command struct {
 	Data      json.RawMessage `json:"data,omitempty"`
 }
 
+// Installed by the CLI entrypoint only. Library users and remote servers never
+// acquire deployment privileges merely by importing community retrieval.
+var OperatorUpdate func(context.Context, string, bool) (any, error)
+var PrepareProject func(string)
+
 func Execute(ctx context.Context, root string, p Command) (any, error) {
+	if p.Action == "server.update" {
+		client, err := NewClient(p.Service)
+		if err != nil {
+			return nil, err
+		}
+		if client.Token == "" {
+			return nil, fmt.Errorf("server.update requires operator credentials and a managed deployment")
+		}
+		if OperatorUpdate == nil {
+			return nil, fmt.Errorf("server.update requires the installed plugin")
+		}
+		return OperatorUpdate(ctx, client.URL, true)
+	}
 	// A server health check needs neither a local project nor a saved credential.
 	if p.Action == "server.ping" && p.Service != "" {
 		return Ping(ctx, p.Service)
@@ -39,6 +57,9 @@ func Execute(ctx context.Context, root string, p Command) (any, error) {
 	}
 	if err := validateRetrieval(p.Retrieval); err != nil {
 		return nil, err
+	}
+	if PrepareProject != nil {
+		PrepareProject(root)
 	}
 	switch p.Action {
 	case "status", "assistance.status":
@@ -282,7 +303,7 @@ func RunJSON(ctx context.Context, root string, b []byte) (string, error) {
 func CommandSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{
 		"root":      map[string]any{"type": "string", "description": "Absolute active project root; use it when calling through a plugin."},
-		"action":    map[string]any{"type": "string", "enum": []string{"server.ping", "status", "assistance.status", "assistance.set", "connections", "connect", "disconnect", "mode.set", "retrieval.set", "knowledge.identify", "knowledge.status", "knowledge.upload", "knowledge.get", "knowledge.delete", "community.create", "community.list", "community.get", "community.update", "community.delete", "community.archive", "server.stats", "access.create", "access.list", "access.revoke", "query", "usage", "audit.list"}, "description": "Readers search all linked communities by default, or an explicit subset. Each key and document read stays scoped to one community. Only the server operator manages content or communities. knowledge.identify maintains local finding IDs and curation timestamps after edits. knowledge.upload replaces changed files automatically. community.delete requires separate human confirmation for locking and final deletion."},
+		"action":    map[string]any{"type": "string", "enum": []string{"server.ping", "server.update", "status", "assistance.status", "assistance.set", "connections", "connect", "disconnect", "mode.set", "retrieval.set", "knowledge.identify", "knowledge.status", "knowledge.upload", "knowledge.get", "knowledge.delete", "community.create", "community.list", "community.get", "community.update", "community.delete", "community.archive", "server.stats", "access.create", "access.list", "access.revoke", "query", "usage", "audit.list"}, "description": "Readers search all linked communities by default, or an explicit subset. Each key and document read stays scoped to one community. Only the server operator manages content or communities. knowledge.identify maintains local finding IDs and curation timestamps after edits. knowledge.upload replaces changed files automatically. community.delete requires separate human confirmation for locking and final deletion."},
 		"retrieval": map[string]any{"type": "string", "enum": []string{"remote"}, "description": "Community retrieval is remote-only. No corpus download or offline cache."},
 		"service":   map[string]any{"type": "string", "description": "HTTPS service origin, or local installer origin. Credentials stay outside the project; local owner access is discovered automatically."}, "community": map[string]any{"type": "string", "description": "Community UUID or slug"}, "alias": map[string]any{"type": "string", "description": "Connected project alias"}, "path": map[string]any{"type": "string", "description": "Local output archive path"}, "mode": map[string]any{"type": "string", "enum": []string{"local", "external", "both"}}, "data": map[string]any{"type": "object", "description": "Operation-specific payload. connect accepts invitation for private joining; projects can link multiple communities. Uploads and document reads require an alias when multiple links exist. See the community skill reference."}}, "required": []string{"action"}}
 }

@@ -3,7 +3,9 @@ package community
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -15,9 +17,10 @@ type readRetryBudget struct {
 	waited  time.Duration
 }
 
-// Retry only explicit busy responses to reads. Every attempt keeps the same
+// Retry bounded busy responses or interrupted connections for safe reads and
+// receipt-idempotent upload batches. Every attempt keeps the same
 // origin, community, credential and payload. Never widen scope or reconnect to
-// evade capacity controls. Mutations and connection creation are not retried.
+// evade capacity controls. Other mutations and connection creation are not retried.
 func (c *Client) call(ctx context.Context, path string, payload, out any) error {
 	request, ok := payload.(Request)
 	retryable := ok && (readOperation(request.Action) || request.Action == "knowledge.inventory" || request.Action == "knowledge.put")
@@ -28,14 +31,25 @@ func (c *Client) call(ctx context.Context, path string, payload, out any) error 
 	// Calls within one Operation are sequential. Public credential renewal must
 	// not replenish its busy-response retry allowance.
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		err := c.callOnce(ctx, path, payload, out)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		var api *APIError
-		if err == nil || !retryable || budget.retries >= 2 || (errors.As(err, &api) && api.Status != 429 && api.Status != 503) || (api == nil && request.Action != "knowledge.put") {
+		var network *net.OpError
+		interrupted := errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+		if err == nil || !retryable || budget.retries >= 2 || (errors.As(err, &api) && api.Status != 429 && api.Status != 503) || (api == nil && !interrupted && request.Action != "knowledge.put") {
 			return err
 		}
 		header := ""
 		if api != nil {
 			header = api.RetryAfter
+		} else if interrupted {
+			// Leave time for a managed application switch without a retry storm.
+			header = strconv.Itoa(1 << budget.retries)
 		}
 		delay, valid := retryDelay(header, budget.retries, time.Now())
 		if !valid || budget.waited+delay > 5*time.Second {

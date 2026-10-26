@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 	kb "github.com/adiazpar/re-discipline/retrieval/community"
 	"github.com/adiazpar/re-discipline/retrieval/connectionauth"
 )
@@ -48,14 +49,14 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			if s.Config.SetupOnly {
-				writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "setup", "community_enabled": false})
+				writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "setup", "community_enabled": false, "software": buildinfo.Current()})
 				return
 			}
 			if err := ValidateOperator(s.Config); err != nil {
 				writeError(w, fail(503, "operator is not configured"))
 				return
 			}
-			writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "ready", "community_enabled": true, "remote_only": true})
+			writeJSON(w, 200, map[string]any{"ok": true, "protocol": kb.ProtocolVersion, "mode": "ready", "community_enabled": true, "remote_only": true, "software": buildinfo.Current()})
 			return
 		}
 		if s.Config.SetupOnly {

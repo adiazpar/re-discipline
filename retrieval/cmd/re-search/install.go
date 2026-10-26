@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,34 +35,41 @@ func installProjectBinary(root string) (string, error) {
 			return filepath.ToSlash(relative), nil
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	if err := refreshFrom(root, source, buildinfo.Current(), true); err != nil {
 		return "", err
 	}
+	return filepath.ToSlash(relative), nil
+}
+
+func copyProjectBinary(source, dest string) error {
 	in, err := os.Open(source)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer in.Close()
 	out, err := os.CreateTemp(filepath.Dir(dest), ".re-search-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	temp := out.Name()
 	defer os.Remove(temp)
 	defer out.Close()
 	if _, err := io.Copy(out, in); err != nil {
-		return "", err
+		return err
 	}
 	if err := out.Chmod(0755); err != nil {
-		return "", err
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		return err
 	}
 	if err := out.Close(); err != nil {
-		return "", err
+		return err
 	}
 	if err := replaceProjectBinary(temp, dest); err != nil {
-		return "", fmt.Errorf("replace project binary (close running copies before retrying): %w", err)
+		return fmt.Errorf("replace project binary (close running copies before retrying): %w", err)
 	}
-	return filepath.ToSlash(relative), nil
+	return nil
 }
 
 func replaceProjectBinary(source, dest string) error {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 	"github.com/adiazpar/re-discipline/server"
 	"github.com/adiazpar/re-discipline/server/database"
 	"github.com/jackc/pgx/v5"
@@ -30,6 +32,9 @@ func run() error {
 	command := "serve"
 	if len(os.Args) > 1 {
 		command = os.Args[1]
+	}
+	if command == "version" {
+		return json.NewEncoder(os.Stdout).Encode(buildinfo.Current())
 	}
 	setupOnly := command == "serve-setup"
 	localOnly := command == "serve-local"
@@ -118,15 +123,20 @@ func run() error {
 		listen = "127.0.0.1" + listen
 	}
 	h := &http.Server{Addr: env("LISTEN_ADDR", listen), Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdown, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 		defer cancel()
 		h.Shutdown(shutdown)
 	}()
 	slog.Info("community service listening", "address", h.Addr, "search_budget", budget)
 	err = h.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
+		// ListenAndServe returns as soon as its listener closes, before Shutdown
+		// finishes draining. Keep the DB and process alive for active requests.
+		<-drained
 		return nil
 	}
 	return err
