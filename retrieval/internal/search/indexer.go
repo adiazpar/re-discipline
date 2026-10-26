@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 	_ "modernc.org/sqlite"
 )
 
@@ -152,12 +153,12 @@ func BuildIndexFileContext(ctx context.Context, root, dbPath string) ([]Doc, []s
 
 // ReadManifest loads the stored file manifest from an index database.
 func ReadManifest(dbPath string) (map[string]FileMeta, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.Query(`SELECT path, mtime, size FROM manifest`)
+	rows, err := indexdb.ReadRows(context.Background(), db, `SELECT path, mtime, size FROM manifest`)
 	if err != nil {
 		return nil, err
 	}

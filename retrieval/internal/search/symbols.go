@@ -2,14 +2,14 @@ package search
 
 import (
 	"bufio"
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 // symbolsRelPath is the optional symbol corpus, relative to
@@ -121,7 +121,7 @@ func LookupSymbol(root, name string, limit int) (SymbolHits, []string, error) {
 	if _, err := os.Stat(dbPath); err != nil {
 		return res, append(warnings, "no index and rebuild unavailable; no results"), nil
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return res, warnings, err
 	}
@@ -132,13 +132,13 @@ func LookupSymbol(root, name string, limit int) (SymbolHits, []string, error) {
 
 	fetch := func(where string, args ...any) ([]Symbol, int, error) {
 		var total int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM symbols WHERE `+where, args...).Scan(&total); err != nil {
+		if err := indexdb.ReadRow(context.Background(), db, `SELECT COUNT(*) FROM symbols WHERE `+where, args...).Scan(&total); err != nil {
 			return nil, 0, err
 		}
 		if total == 0 {
 			return nil, 0, nil
 		}
-		rows, err := db.Query(`SELECT name, kind, render, source FROM symbols WHERE `+where+
+		rows, err := indexdb.ReadRows(context.Background(), db, `SELECT name, kind, render, source FROM symbols WHERE `+where+
 			` ORDER BY length(name), name, kind LIMIT ?`, append(args, limit)...)
 		if err != nil {
 			return nil, 0, err
@@ -171,13 +171,13 @@ func LookupSymbol(root, name string, limit int) (SymbolHits, []string, error) {
 
 // CountSymbols reports how many symbol rows an index database holds.
 func CountSymbols(dbPath string) (int, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return 0, err
 	}
 	defer db.Close()
 	var n int
-	err = db.QueryRow(`SELECT COUNT(*) FROM symbols`).Scan(&n)
+	err = indexdb.ReadRow(context.Background(), db, `SELECT COUNT(*) FROM symbols`).Scan(&n)
 	return n, err
 }
 
