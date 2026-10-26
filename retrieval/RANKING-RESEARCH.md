@@ -282,6 +282,32 @@ coverage gate therefore rejected it before reranking or another fresh draw.
 Private vector storage remained 19,402,752 bytes. Equal model dimensions and
 private coverage did not establish equal transfer quality.
 
+A longer-context replacement tested
+[Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B),
+pinned at `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`. It used the published
+query instruction exactly once, unprefixed documents, normalized last-token
+pooling, 1,024 dimensions and a 2,048-token limit. The lexical-20/dense-eight
+budget, projection and authority rules stayed fixed. Model and context changed
+together, so this does not isolate the effect of longer context.
+
+Candidate coverage improved from **700 to 701 of 701** known private questions,
+with one gain and no losses. On NFCorpus it improved from **247 to 250 of 323**,
+with seven gains and four losses. However, mean recall of all positive judgments
+inside the candidate pool fell from **0.203228128 to 0.202583809**. That small
+decline failed the exact completeness threshold fixed before inference. The
+replacement was rejected before Godot, final reranking, another fresh draw or
+controlled cost testing. This decision does not establish that the model is
+generally worse, and does not evaluate combining the two retrievers.
+
+Synthetic checks verified pooling, prompts, padding and CPU/MPS agreement.
+An independent audit re-encoded all 1,024 queries, sampled 16 documents across
+both corpora, verified every saved vector part and reconstructed every candidate
+pool. Maximum embedding-coordinate differences were below `1.7e-6`. Actual
+forwards stayed within 2,048 tokens and batches of four. The private vector
+matrix occupied 51,740,672 bytes versus 19,402,752 for BGE-small; the downloaded
+checkpoint files occupied about 1.21 GB. These are research artifacts, with no
+production latency, cross-platform neural inference or server-capacity claim.
+
 A wider candidate window was also rejected. A frozen comparison of 32 lexical
 plus eight semantic, 32 plus 16, and 40 plus 16 candidates selected 32 plus 16
 for its combined candidate coverage with the least additional scoring work.
@@ -419,6 +445,41 @@ understate its total cost. No production or cross-platform runtime was added.
 The author used NanoBEIR and MTEB during checkpoint selection, so public
 SciFact/NFCorpus results would not constitute independent model-selection
 holdouts for these models.
+
+## Joint ordering of the first five documents
+
+A separate experiment tested whether a model comparing documents jointly could
+improve the retained first-five order. It used
+[LiT5-Distill-base](https://huggingface.co/castorini/LiT5-Distill-base), pinned at
+`6d45dbc0fe51ea1a86aa695a2b8f3e279d3f5a77`, with the authors' query/passage prompt
+and canonical slow T5 tokenizer. Five passages were encoded separately at 150
+tokens each; their representations were joined for greedy decoding of document
+identifiers. Float32 inference, a 40-token output bound and the existing
+authority rules were fixed. This adapts LiT5 to the retained first five; it is
+not a reproduction of the authors' full sliding-window pipeline.
+
+| Development variant, 384 questions | First / top-five / top-eight | Invalid permutations | First-place gains / losses |
+|---|---:|---:|---:|
+| Retained baseline | 339 / 379 / 383 | — | — |
+| LiT5 with strict fallback | 327 / 379 / 383 | 192 | 8 / 20 |
+| LiT5 with constrained decoding | 313 / 379 / 383 | 0 | 8 / 34 |
+
+The first variant kept the original head whenever the generated IDs were not a
+complete permutation of the five inputs. Synthetic outputs included a sixth ID,
+which motivated a separate constrained variant frozen before inspecting the
+aggregate development result. A prefix trie allowed only the 120 valid
+permutations. Exhaustive checks covered all 1,062 unique token prefixes, illegal
+token masking and termination; CPU and Apple GPU synthetic outputs agreed.
+Valid output syntax did not produce better relevance.
+
+Both variants failed the development gate and stopped before the remaining 317
+questions, public benchmarks, fresh questions or cost tests. Independent audits
+reconstructed every original and modified list, including head membership,
+unchanged tails and relevance arithmetic. Both had 1,315 of 1,920 passage inputs
+longer than the 150-token bound, so these results do not isolate the model from
+its restricted context. Neither variant changed production behavior or added a
+plugin dependency. Model-specific redistribution terms remain unresolved; the
+checkpoint was used only in the private experiment.
 
 ## Query-side lexical weighting
 
