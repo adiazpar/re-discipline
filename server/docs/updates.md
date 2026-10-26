@@ -18,7 +18,9 @@ An explicit `init-project` refresh can replace a development build.
 
 MCP runs the engine inside the plugin, so a read-only project directory or a
 Windows executable still in use does not interrupt retrieval. Refresh failures
-are reported on stderr and retried on a later tool call/session. A standalone
+are reported on stderr and retried on a tool call after a one-minute cooldown,
+or in a new session. Concurrent calls continue using the plugin engine while
+one refresh runs. A standalone
 project executable cannot discover plugin updates on its own. Conventions and
 instruction templates still refresh through `init-project`; engine updates never
 rewrite knowledge.

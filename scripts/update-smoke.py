@@ -127,6 +127,11 @@ def main():
             report['owner_identity_preserved']=True
             report['transport']='ssh' if args.ssh else 'local'
             report['target']=target
+            if args.ssh:
+                # The fixture logs in as root. Native Linux bind mounts retain
+                # that UID, unlike Docker Desktop's ownership mapping. Restore
+                # the runner's ownership before local inspection of private files.
+                run(docker+['exec',ssh_name,'chown','-R',f'{os.getuid()}:{os.getgid()}',str(base)])
             # A second management request must leave the current container intact.
             first_id=run(compose+['ps','-q','app']).stdout
             again=run([sys.executable,REPO/'scripts/community-update.py','ensure','--service',service,'--retry'],env=transport_env)
@@ -190,6 +195,7 @@ def main():
                 try:probe.wait(timeout=10)
                 except subprocess.TimeoutExpired:probe.kill();probe.wait()
             if ssh_name:
+                subprocess.run(docker+['exec',ssh_name,'chown','-R',f'{os.getuid()}:{os.getgid()}',str(base)],capture_output=True)
                 subprocess.run(docker+['rm','-f',ssh_name],capture_output=True)
             if ssh_image:
                 subprocess.run(docker+['image','rm',ssh_image],capture_output=True)

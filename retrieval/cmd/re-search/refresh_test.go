@@ -1,14 +1,56 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 )
+
+func TestRefreshFailureBacksOffAndRecoversWithoutBlockingOtherQueries(t *testing.T) {
+	var state projectRefreshState
+	now := time.Now()
+	attempts := 0
+	locked := errors.New("executable still running")
+	attempt := func() error { attempts++; return locked }
+	if err := state.run(now, attempt); !errors.Is(err, locked) {
+		t.Fatal("missing initial failure", err)
+	}
+	for i := 0; i < 100; i++ {
+		if err := state.run(now.Add(30*time.Second), attempt); err != nil {
+			t.Fatal("query retried during cooldown", err)
+		}
+	}
+	if attempts != 1 {
+		t.Fatal("repeated failed refresh on every query", attempts)
+	}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		state.run(now.Add(time.Minute), func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	defer func() { close(release); <-done }()
+	returned := make(chan struct{})
+	go func() {
+		state.run(now.Add(time.Minute), func() error { panic("concurrent refresh") })
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("query blocked behind in-progress refresh")
+	}
+}
 
 func TestProjectRefreshRepairsAndDoesNotDowngrade(t *testing.T) {
 	root := t.TempDir()

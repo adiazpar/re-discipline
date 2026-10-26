@@ -181,6 +181,36 @@ def main():
 
         golden = [json.loads(line) for line in
                   (project / ".re-discipline/golden.jsonl").read_text().splitlines() if line]
+        if os.name == "nt":
+            # An unsigned PE still executes with trailing bytes. Hold this stale
+            # project copy open while the bundled MCP engine serves eight queries.
+            local_binary.write_bytes(artifact.read_bytes() + b"stale fixture")
+            running = subprocess.Popen([str(local_binary), "serve", "--mcp"], cwd=work,
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL, text=True)
+            try:
+                running.stdin.write(json.dumps(rpc(1, "initialize", {"protocolVersion": "2024-11-05"})) + "\n")
+                running.stdin.flush()
+                assert json.loads(running.stdout.readline())["result"]["serverInfo"]
+                requests = [rpc(1, "initialize", {"protocolVersion": "2024-11-05"})]
+                requests += [rpc(i + 2, "tools/call", {"name": "query", "arguments": {
+                    "root": str(project), "query": golden[0]["q"], "sources": "local", "limit": 1}}) for i in range(8)]
+                started = time.monotonic()
+                result = run([str(binary), "serve", "--mcp"], cwd=work,
+                             input="".join(json.dumps(req) + "\n" for req in requests))
+                assert time.monotonic() - started < 10, "locked project copy delayed every query"
+                responses = [json.loads(line) for line in result.stdout.splitlines()]
+                assert len(responses) == 9
+                for response in responses[1:]:
+                    answer = json.loads(response["result"]["content"][0]["text"])
+                    assert answer["hits"][0]["path"] == golden[0]["expect"], answer
+                assert "refresh deferred" in result.stderr, "fixture did not hold the executable lock"
+            finally:
+                running.communicate(timeout=10)
+            run([str(binary), "serve", "--mcp"], cwd=work,
+                input="".join(json.dumps(req) + "\n" for req in requests[:2]))
+            assert local_binary.read_bytes() == artifact.read_bytes(), "new session did not recover after unlock"
+            print("Windows locked project copy: eight accurate queries during deferred refresh, then recovery passed")
         for provider in ["claude", "codex"]:
             local_binary.write_bytes(b"stale before MCP")
             manifest = json.loads((plugin / f".{provider}-plugin/plugin.json").read_text())
