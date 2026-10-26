@@ -58,7 +58,27 @@ def sha256(path):
 
 def model_hashes(directory):
     return {str(f.relative_to(directory)): sha256(f) for f in sorted(directory.rglob("*"))
-            if f.is_file() and f.suffix in {".safetensors", ".onnx", ".json", ".txt"}}
+            if f.is_file() and f.suffix in {".safetensors", ".onnx", ".json", ".txt", ".model", ".data", ".onnx_data"}}
+
+
+def score_pairs(model, pairs, batch_size, sort_by_length=False):
+    """Reduce padding without changing text or assigning scores to other rows."""
+    if not pairs:
+        return []
+    order = list(range(len(pairs)))
+    if sort_by_length:
+        tokens = model.tokenizer(pairs, padding=False, truncation=True)["input_ids"]
+        if len(tokens) != len(pairs):
+            raise RuntimeError("Tokenizer returned a different number of pairs")
+        order.sort(key=lambda i: -len(tokens[i]))
+    values = model.predict([pairs[i] for i in order], batch_size=batch_size,
+                           show_progress_bar=False).tolist()
+    if len(values) != len(pairs) or not all(isinstance(s, (int, float)) and math.isfinite(s) for s in values):
+        raise RuntimeError("Reranker returned invalid scores")
+    scores = [0.0] * len(pairs)
+    for original_index, value in zip(order, values):
+        scores[original_index] = value
+    return scores
 
 
 class SemanticCandidates:
@@ -128,6 +148,8 @@ def main():
     p.add_argument("--shortlist", type=int, default=20)
     p.add_argument("--max-length", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--sort-by-length", action="store_true", help="Group similar token lengths and restore scores to original candidate order")
+    p.add_argument("--attention", choices=["auto", "sdpa", "eager"], default="auto", help="Torch attention implementation; auto supports models without SDPA")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--weight", type=float, default=1, help="Neural reciprocal-rank-fusion weight; not a confidence")
     p.add_argument("--rrf-k", type=float, default=10)
@@ -168,7 +190,11 @@ def main():
     import torch
     from sentence_transformers import CrossEncoder
     torch.set_num_threads(a.threads)
-    kwargs = {"use_safetensors": True, "attn_implementation": "sdpa"}
+    # Some checkpoints are stored in fp16, which can be much slower on CPUs.
+    # Use explicit fp32 for reproducible comparisons across Torch checkpoints.
+    kwargs = {"use_safetensors": True, "dtype": torch.float32}
+    if a.attention != "auto":
+        kwargs["attn_implementation"] = a.attention
     if a.backend == "onnx":
         import onnxruntime as ort
         options = ort.SessionOptions()
@@ -195,6 +221,8 @@ def main():
               "binary_sha256": sha256(binary),
               "index_sha256": index_hash,
               "model_files_sha256": model_hashes(a.model),
+              "torch_dtype": "float32" if a.backend == "torch" else None,
+              "attention": getattr(model.model.config, "_attn_implementation", None),
               "parameters": {k: str(v) if isinstance(v, Path) else v for k, v in vars(a).items()},
               "model_load_ms": load_ms, "cases": []}
     if semantic:
@@ -228,10 +256,8 @@ def main():
             row["exact"] = bool(exact and exact in (declared or "").split())
             pairs.append((case["q"], projection(row["title"], body)))
         start = time.perf_counter()
-        scores = model.predict(pairs, batch_size=a.batch_size, show_progress_bar=False).tolist() if pairs else []
+        scores = score_pairs(model, pairs, a.batch_size, a.sort_by_length)
         inference_ms = (time.perf_counter() - start) * 1000
-        if len(scores) != len(rows) or not all(isinstance(s, (int, float)) and math.isfinite(s) for s in scores):
-            raise RuntimeError("Reranker returned invalid scores")
         order = rank(rows, scores, a.weight, a.rrf_k)
         after = [rows[i]["path"] for i in order]
         report["cases"].append(dict(case, baseline_rank=answer_rank(before[:8], case["expect"]),

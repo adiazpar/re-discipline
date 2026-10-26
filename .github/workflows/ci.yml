@@ -29,6 +29,8 @@ jobs:
           go test ./...
       - name: Verify native artifact matches the pinned canonical build
         run: go run ./scripts/build.go -check
+      - name: Verify research evaluation contracts without model dependencies
+        run: python scripts/test_evaluate_reranker.py
       - name: Install reference agent hosts and the plugin through each marketplace
         run: |
           npm install --global @anthropic-ai/claude-code@2.1.291 @openai/codex@0.164.0

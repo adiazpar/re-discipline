@@ -5,7 +5,10 @@ additional candidates, and a cross-encoder reranker. After the 48-question
 comparison, an additional frozen 80-question confirmation set improved from
 71 to 78 first-place matches and from 77 to 80 top-eight matches. All 80 were in
 the top five. This is evidence of improvement
-on this sample, **not a guarantee for arbitrary future questions**.
+on this sample, **not a guarantee for arbitrary future questions**. A subsequent
+63-question set improved from 53 to 60 first-place matches, with 62 expected
+documents in the top five. Its remaining candidate-retrieval miss demonstrates
+why the earlier perfect top-five coverage was not a universal guarantee.
 
 The models remain offline developer experiments. They are not dependencies of
 the plugin, not shipped in its binaries, and not deployed to community servers.
@@ -36,6 +39,13 @@ answer paths: 36 facts, 36 reference entries and the eight remaining operational
 documents, seed 20261028. SHA-256:
 `ecbf8986578d81f9c40c49bb57d0a2fc9bdeacf23e96edf78b1c804f50cec930`.
 The selected hybrid's parameters were kept unchanged for this confirmation.
+
+A fourth draw selected 64 new documents, excluding all 512 previous target paths,
+with seed 20261029. One note contained only a topic description, so it became an
+insufficient-evidence probe before retrieval, without resampling. The remaining
+63 answerable questions comprise 31 facts and 32 reference entries. All 58
+operational documents had already been used as targets. SHA-256:
+`e41595febc448426fa16c05f7d8f2321340b9855e07aae5fc54e906ab27a8023`.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -138,6 +148,28 @@ agent-authored samples from one corpus, not independent confirmation across
 projects. The final confirmation's median reranking cost remained about 2.27
 seconds on MPS; quality improvements did not remove the inference cost.
 
+The unchanged model, candidate depths and fusion weights then achieved
+60/63 first-place and 62/63 top-five/top-eight matches on the fourth draw, versus
+53/61/61 for the checkpoint. Seven first-place matches improved and none were
+lost. Across these three separate sets, the counts are 183/191 first-place and
+190/191 top-five matches, versus 166/191 and 184/191 for the checkpoint.
+
+The missing candidate was lexical rank 24 and semantic rank 39, outside the
+20-plus-eight pool. The other two nominated documents ranked second and fourth.
+These labels and candidate budgets were not changed after seeing the results.
+Returning more candidates has a compute cost; reranking cannot repair a missing
+candidate. The fourth draw had no operational-document targets, so its 1.56-second
+median inference time is not directly comparable with the earlier 80-question mix.
+
+A smaller alternative, the 70.8-million-parameter Mixedbread xsmall reranker,
+was rejected on the 384 development questions. No positive reranking weight beat
+semantic fusion alone on first-place matches: weight .25 produced 324 first-place
+and 381 top-eight matches, versus 327/379 without reranking and 333/383 for the
+selected ModernBERT. It was not advanced to a fresh held-out evaluation. Smaller
+parameter count did not translate into better latency here: a paired ten-query
+pilot was slower on MPS than CPU, and the full CPU run's median was 1.93 seconds
+while other experiments were running.
+
 ## Native compound-word candidate
 
 An ordinary unmatched word can have a source phrase equivalent: for example,
@@ -156,6 +188,8 @@ not evidence of general semantic understanding.
 
 The subsequent 80-question confirmation also had identical aggregate native
 scores before and after compound recovery. It did not require a schema rebuild.
+The fourth 63-question set and the public SciFact native comparison also had
+identical aggregate scores before and after compound recovery.
 
 Independent boundary tests cover six compound forms, source-field adjacency,
 identifier authority, probe and expansion budgets, cancellation and equality
@@ -203,6 +237,27 @@ than PyTorch on a preselected 12-query subset and was discarded. These results
 are specific to this model and ARM64 machine; no Intel or Windows model speedup
 is claimed.
 
+An optional length-grouping experiment reduces padding by batching similar-sized
+query/document pairs, then restoring every score to its original candidate.
+It does not shorten the text. Batch size four was fastest in a ten-query
+development pilot (1.38x median paired speedup); larger batches were slower.
+All full result orders, not just expected-answer ranks, were preserved on the
+80-question confirmation, with maximum logit difference below 4.8e-7. Its full-run
+median/p95 was 2.19/3.43 seconds with concurrent CPU work, so the pilot speedup
+must not be presented as a general performance improvement. The harness exposes
+this as `--sort-by-length` and keeps it optional.
+
+Reducing ModernBERT's input limit from 1,024 to 512 tokens improved development
+first-place matches from 333 to 335 while retaining 379 top-five and 383 top-eight
+matches. Of 9,370 development pairs, 1,458 exceeded 512 tokens and were rescored;
+unchanged inputs reused their original scores. On the separate, already evaluated
+48/80/63-question validation sets, first-place and top-five/top-eight counts were
+unchanged, with no first-place gains or losses. One expected rank worsened from
+third to fourth in the first validation set. These checks measure ranking quality,
+not full-query latency; timing only the changed pairs would understate the cost.
+Reducing the lexical pool to 16 alongside the shorter input lost one development
+first-place match and was not selected. The candidate pool remains 20 plus eight.
+
 Retrieval race tests, vet, macOS Intel tests under Rosetta, and PostgreSQL server
 race tests passed for the native candidate. Both Claude and Codex MCP adapters
 returned the same results with no errors. All five native artifacts were rebuilt
@@ -239,6 +294,11 @@ read the documents, check scope, refine or split a query, and identify missing
 information. MCP and project guidance now say this explicitly. No uncalibrated
 score threshold was added to pretend a ranked hit proves an answer exists.
 
+The fourth draw's excluded note illustrates this distinction directly: native
+retrieval placed it first, but reading it showed that it names the topic without
+providing the requested instructions. A rank-one hit would have been a misleading
+success label if answerability had not been checked before retrieval.
+
 ## Reproduction
 
 Use `scripts/evaluate-ranking.py` for native binary comparisons. The separate
@@ -262,6 +322,7 @@ quantization followed the official efficiency documentation linked below.
 | `cross-encoder/ms-marco-MiniLM-L6-v2` | `233902d25c440f23af6f7d6e94d2946bac0bee0a` | Apache-2.0 |
 | `Alibaba-NLP/gte-reranker-modernbert-base` | `f7481e6055501a30fb19d090657df9ec1f79ab2c` | Apache-2.0 |
 | `BAAI/bge-small-en-v1.5` | `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` | MIT |
+| `mixedbread-ai/mxbai-rerank-xsmall-v1` | `b5c6e9da73abc3711f593f705371cdbe9e0fe422` | Apache-2.0 |
 
 Download pinned snapshots separately, then run entirely locally:
 
@@ -275,17 +336,26 @@ python scripts/evaluate-reranker.py \
   --query-prefix 'Represent this sentence for searching relevant passages: ' \
   --shortlist 20 --semantic-candidates 8 --fusion-depth 40 \
   --dense-weight .25 --dense-k 10 --weight 1 --rrf-k 10 \
-  --max-length 1024 --batch-size 4 --device mps \
+  --max-length 1024 --batch-size 4 --sort-by-length --device mps \
   --output /private/hybrid-results.json
 ```
 
 Use `--device cpu` where appropriate. Omit embedding arguments for lexical-only
-reranking. For a previously exported local CPU graph, use `--backend onnx` and
+reranking. Torch uses explicit float32; `--attention auto` supports architectures
+without SDPA, while `--attention sdpa` can pin that implementation for supported
+models. The report records the actual attention implementation. For a previously
+exported local CPU graph, use `--backend onnx` and
 `--onnx-file onnx/model_int8_arm64.onnx` with its containing directory as `--model`.
 The harness does not export or download graphs. It checks that the index and binary stay fixed, hashes model
 files and questions, records actual candidate recall, and never inserts expected
 answers into the result pool. Its one-vector-per-document projection truncates
 long documents; long-document chunking needs separate evaluation.
+
+Dependency-free evaluation-contract tests run in all five native CI environments.
+They check score/document alignment after batching, invalid model outputs,
+authority and supersession ordering, multiple pre-judged answers and preservation
+of scope when removing local evidence. They do not establish that model inference
+works or performs equally on every platform.
 
 ## Research basis and next gate
 
