@@ -1,7 +1,8 @@
 # Retrieval research loop, 2026-10-25
 
-The strongest prototype combines lexical retrieval, a small embedding model for
-additional candidates, and a cross-encoder reranker. After the 48-question
+The strongest retained prototype on the private corpus combines lexical
+retrieval, a small embedding model for additional candidates, and a cross-encoder
+reranker. After the 48-question
 comparison, an additional frozen 80-question confirmation set improved from
 71 to 78 first-place matches and from 77 to 80 top-eight matches. All 80 were in
 the top five. This is evidence of improvement
@@ -18,6 +19,12 @@ gate, so the original hybrid remains selected.
 
 The models remain offline developer experiments. They are not dependencies of
 the plugin, not shipped in its binaries, and not deployed to community servers.
+The later 57-question YOLO check exposed a transfer failure: the hybrid had five
+first-place matches against the frozen native checkpoint's 13. Focused follow-up
+searches improved evidence coverage with either backend, but did not change the
+original first eight results. This rules out treating the hybrid as a universal
+default; the workflow gains are separate from first-place ranking or answer
+correctness.
 The published baseline remains `07f6ba9`; the previous experimental checkpoint is
 `0792857`. The native candidate adds bounded compound-word recovery and clearer
 agent instructions for reading evidence. It does not integrate a model service.
@@ -86,7 +93,9 @@ authored and reviewed by the same agent. They are not independent human labels,
 and the sources are already in the corpus. After passing the known-data gates,
 the agreement rule described below improved first-place matches from 45 to 47,
 preserving all 48 in the first five. Those 48 questions are now known data too.
-The eight separate behavior cases remain unevaluated.
+The eight separate behavior cases have now undergone retrieval and a limited
+evidence walkthrough, described below; autonomous agent compliance remains
+unevaluated.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -704,7 +713,105 @@ complete-query comparison. Cost and answerability remain unresolved.
 For fresh-domain confirmation, all 57 FreshStack YOLO questions and 114 focused
 queries were frozen before downloading the corpus, loading relevance judgments
 or running retrieval. Only question columns were exposed during planning.
-That comparison is pending; no search-plan policy has been added to the plugin.
+The complete 27,207-document corpus contains 198 judged required facts and 420
+positive query/document pairs. The official data revisions and file hashes were
+pinned. An independent data audit checked every document and question binding.
+All 57 questions stayed in the evaluation denominator.
+
+A separate native-only comparison was frozen before viewing the fresh outcomes.
+It uses the same plans and merge policy, with the frozen native checkpoint for
+all three searches, compared against that checkpoint's original first 24. On
+the 24 known questions it improved mean fact coverage from 0.39583 to 0.49653,
+complete-fact questions from five to eight, and questions with any relevant
+document from 14 to 15. All 72 native searches were replayed independently.
+Passing this comparison does not establish superiority to the hybrid.
+
+| Fresh YOLO evidence at 24 | Native original | Native with follow-ups | Hybrid original | Hybrid with follow-ups |
+|---|---:|---:|---:|---:|
+| Mean required-fact coverage | 0.41930 | 0.53480 | 0.46930 | 0.61404 |
+| Questions with every required fact | 15 | 23 | 19 | 27 |
+| Questions with any relevant document | 32 | 38 | 34 | 43 |
+| Mean positive-document recall | 0.20465 | 0.28221 | 0.22383 | 0.32158 |
+
+Both workflows passed their aggregate gates against their own baselines.
+Individual regressions remain: native fact coverage improved on 15 questions
+and declined on three; hybrid coverage improved on 12 and declined on two.
+The hybrid's paired mean coverage gain was 0.14474, with a descriptive paired
+bootstrap 95% interval of [0.05702, 0.23977] using 10,000 resamples. This interval
+does not account for all earlier exploratory model choices or establish a
+universal guarantee. Both workflows retain the original first eight exactly.
+
+The same fresh run also exposes a weakness of the original hybrid itself:
+native first / top five / top eight counts were **13 / 24 / 26**, compared with
+the hybrid's **5 / 20 / 26**. Better coverage at a larger budget does not erase
+that first-place regression. These results do not support replacing native
+search with this hybrid for arbitrary domains.
+
+The independent audit reconstructed all 171 candidate pools, feature vectors,
+authority rules and rankings, all 57 merges, the fact metrics and bootstrap.
+It replayed all 171 native queries, reencoded all 171 query vectors and 24 sampled
+document vectors, and rescored 24 sampled model pairs. The repeated vector and
+model-score differences were zero. A separate native workflow audit checked its merges and
+metrics against those verified native outputs. Audits validate the computation;
+the public pooled judgments and same-agent query planning remain limitations.
+
+Input length is a concrete unresolved constraint: 22,437 of 27,207 document
+encodings, 22 of 171 query encodings and 4,395 of 4,551 reranker pairs exceeded
+512 tokens before truncation. The model calls remained capped at 512. This
+makes truncation a plausible contributor to the transfer failure, without
+establishing it as the sole cause. Mean full-document bytes in the hybrid
+24-result sets fell slightly, from 143,378 to 140,836. These bytes are not the
+agent's actual context consumption.
+
+The native workflow passed a separately frozen retrieval-cost screen on this
+Mac's ARM CPU: 12 questions were selected without labels from three equal
+question-length groups, with three paired repeats and alternating arm order.
+Both arms reran the original query; the variant also reran both follow-ups.
+No query-result cache or concurrent inference job was used. Across 144 timed
+searches, mean complete retrieval time increased from **2.564 to 5.325 seconds**,
+median from **2.462 to 5.244**, and p95 from **3.823 to 6.852**. Peak child-process
+RSS was 60.7 MiB. Mean full-document bytes fell from 156,001 to 152,927.
+
+The fixed provisional limits were 3.2 times mean latency, four times p95, and
+1.25 times document bytes, reflecting a workflow of at most three searches.
+The observed ratios were 2.077, 1.792 and 0.980. An independent audit verified
+the selection, all 72 paired-arm records, result orders, byte counts and metrics.
+These are retrieval-only measurements on a small stratified sample, not a user
+SLA, agent planning/reading cost, network cost, server-load result or permission
+to run three searches for every question. Both quality and cost comparisons use
+the frozen native checkpoint, not a new release of the installed plugin.
+
+No search-plan policy has been added to the plugin. Integration must preserve the exact project and
+community selection on every follow-up and reconcile finding identities across
+independent snapshots; path deduplication in these static benchmarks does not
+test those guarantees. Agent answerability, planning and reading costs, and
+concurrent server behavior remain separate gates.
+
+## Evidence sufficiency probes
+
+The eight previously reserved behavior cases were queried unchanged using both
+the native checkpoint and retained hybrid. They cover four ambiguous requests,
+three requests for unsupported details, and one false premise. The candidate
+models saw only the question and document projection, never the expected
+behavior or nominated support paths. An independent audit replayed the native
+queries and explanations, reencoded all eight queries, reconstructed all
+candidate orders, and rescored 24 sampled pairs; it passed.
+
+All three unsupported-detail requests retrieved a finding that explicitly says
+the requested detail is not established: within the native first three and first
+in the hybrid. The false-premise finding was first in both. This demonstrates
+why finding a highly relevant source is different from having an answer; the
+body's limitations matter. The ambiguous requests still require missing context
+or conditional alternatives, regardless of plausible search hits.
+
+A qualitative walkthrough read 13 selected returned documents, not all 81
+distinct first-eight candidates. The same agent knew the case requirements and
+wrote illustrative scoped responses. **This is not an autonomous Claude/Codex
+behavior test, an eight-of-eight success score, or proof of corpus-wide
+unanswerability.** The distinction follows research on
+[context sufficiency](https://arxiv.org/abs/2411.06037), which separates useful
+retrieved material from enough information to answer. No new confidence
+threshold, refusal rule, or model service was added.
 
 ## Query-side lexical weighting
 
