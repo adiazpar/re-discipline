@@ -255,6 +255,30 @@ before further reranking or a fresh evaluation. Its 768-dimensional private-corp
 matrix used 38,805,504 bytes versus 19,402,752 for the smaller encoder. A larger
 model helped one collection but did not uniformly improve coverage.
 
+A wider candidate window was also rejected. A frozen comparison of 32 lexical
+plus eight semantic, 32 plus 16, and 40 plus 16 candidates selected 32 plus 16
+for its combined candidate coverage with the least additional scoring work.
+All 961 original candidate lists were reproduced before widening, and every
+wider pool retained the original candidates. The selected window increased
+candidate coverage from 637 to 638 private questions and from 247 to 262
+NFCorpus queries, but subsequent ranking did not preserve private quality:
+
+| Fixed models and fusion | Private first / top 5 / top 8 (638) | NFCorpus first / top 5 / top 8 (323) | NFCorpus nDCG@10 |
+|---|---:|---:|---:|
+| Original 20 lexical + 8 semantic | 585 / 632 / 636 | 162 / 222 / 226 | .362749 |
+| Wider 32 lexical + 16 semantic | 582 / 630 / 637 | 162 / 222 / 229 | .364034 |
+
+The wider private pool caused three first-place losses and no gains. One loss
+returned a plausibly useful alternative passage; frozen nominated-document
+labels were not expanded after inspection. The public comparison had two
+first-place gains and two losses. Every public per-query nDCG value was
+independently checked against scikit-learn. Average unique candidate counts grew
+from 24.33 to 42.06 privately and from 20.20 to 34.13 publicly. Only 15,812 new
+query/document pairs needed scoring because the unchanged inputs reused their
+previous scores; these partial timings do not measure full-query latency.
+The original 20-plus-eight window remains selected. A larger candidate pool
+finding more positives does not establish that its final ordering is better.
+
 ## Public corpus transfer check
 
 The same fixed hybrid was evaluated against all 300 test claims and 5,183
@@ -491,6 +515,15 @@ The fifth draw likewise excluded a variable entry with no help text before
 asking the system for its supported values; a name match would not supply those
 missing semantics.
 
+Incomplete judgments are another limitation: a different useful passage can
+look like a failure when only one nominated path is accepted. The
+[D-MERIT study](https://arxiv.org/abs/2406.16048) demonstrates that partial
+annotation can change measured system comparisons on its Wikipedia collection.
+That does not establish the size of this effect here. Existing judgments remain
+frozen; subsequent source-based question sets identify multiple acceptable
+passages before retrieval when the sources justify them. Neither a larger
+accepted set nor a rank-one hit proves that an agent has a complete answer.
+
 ## Reproduction
 
 Use `scripts/evaluate-ranking.py` for native binary comparisons. The separate
@@ -594,8 +627,9 @@ instead of treating a high retrieval rank as proof of an answer.
 
 The public checks add independent judgments across corpora, but expose a
 remaining candidate-coverage ceiling. Replacing the embedding model failed its
-coverage gate; the next experiment will test a wider, bounded candidate window
-with the existing models and measure its ranking quality and added work.
+coverage gate; widening the candidate window improved coverage but failed its
+ranking-quality gate. The next trial changes the reranker while retaining the
+selected pool and frozen fusion weights.
 Before model integration, measure
 long-document recall and ambiguous/unanswerable behavior, then test
 CPU/quantized inference, memory and concurrent server load.
