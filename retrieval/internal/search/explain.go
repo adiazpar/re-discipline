@@ -2,14 +2,14 @@ package search
 
 import (
 	"bufio"
-	"database/sql"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 // sortByRaw orders candidates as bm25 alone would have, superseded last,
@@ -79,26 +79,26 @@ func Stats(root string) (StatsResult, []string, error) {
 	if _, err := os.Stat(dbPath); err != nil {
 		return out, append(warnings, "no index yet; run: re-search index"), nil
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return out, warnings, err
 	}
 	defer db.Close()
 
-	if err := db.QueryRow(`SELECT count(*) FROM docs`).Scan(&out.Documents); err != nil {
+	if err := indexdb.ReadRow(context.Background(), db, `SELECT count(*) FROM docs`).Scan(&out.Documents); err != nil {
 		return out, warnings, err
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM symbols`).Scan(&out.Symbols); err != nil {
+	if err := indexdb.ReadRow(context.Background(), db, `SELECT count(*) FROM symbols`).Scan(&out.Symbols); err != nil {
 		return out, warnings, err
 	}
 	// An index written by an older build may predate indexmeta; an
 	// unknown format is reported, not treated as a failure.
-	_ = db.QueryRow(`SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&out.IndexFormat)
+	_ = indexdb.ReadRow(context.Background(), db, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&out.IndexFormat)
 
 	for col, into := range map[string]map[string]int{
 		"kind": out.ByKind, "status": out.ByStatus, "grade": out.ByGrade,
 	} {
-		rows, err := db.Query(`SELECT ` + col + `, count(*) FROM docs GROUP BY ` + col)
+		rows, err := indexdb.ReadRows(context.Background(), db, `SELECT `+col+`, count(*) FROM docs GROUP BY `+col)
 		if err != nil {
 			return out, warnings, err
 		}

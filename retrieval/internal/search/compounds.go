@@ -6,6 +6,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 const (
@@ -30,7 +32,7 @@ func expandCompounds(ctx context.Context, db matchProber, q, match string) (stri
 	exists := func(expression string) (bool, error) {
 		probes++
 		var id int64
-		err := db.QueryRowContext(ctx, `SELECT rowid FROM docs WHERE docs MATCH ? LIMIT 1`, expression).Scan(&id)
+		err := indexdb.ReadRow(ctx, db, `SELECT rowid FROM docs WHERE docs MATCH ? LIMIT 1`, expression).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}

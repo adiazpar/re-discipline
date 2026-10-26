@@ -27,7 +27,11 @@ default; the workflow gains are separate from first-place ranking or answer
 correctness.
 The published baseline remains `07f6ba9`; the previous experimental checkpoint is
 `0792857`. The native candidate adds bounded compound-word recovery and clearer
-agent instructions for reading evidence. It does not integrate a model service.
+agent instructions for reading evidence. It also defers document payload work
+until after SQL candidate selection and handles transient local index contention.
+The latter changes preserved all 3,186 complete response comparisons against
+checkpoint `8caddc9`; their final Mac ARM64 timing and concurrency results are
+recorded below. They do not integrate a model service.
 
 ## Protocol and limits
 
@@ -857,6 +861,108 @@ community selection on every follow-up and reconcile finding identities across
 independent snapshots; path deduplication in these static benchmarks does not
 test those guarantees. Agent answerability, planning and reading costs, and
 concurrent server behavior remain separate gates.
+
+## Native SQL cost and concurrent bookkeeping
+
+Profiling 36 routes from 12 length-stratified YOLO questions separated freshness
+checks from ranking: mean times were 0.122 and 1.058 seconds respectively.
+CPU samples attributed 58.96% to database reads, 19.96% to writes and 5.74% to
+snippet work. These samples identify a cost direction; they do not directly
+measure temporary-file bytes.
+
+The native optimization selects the same bounded row IDs and scores in a
+materialized SQLite CTE before fetching metadata and computing snippets.
+Selection and payload retrieval remain in one statement and snapshot, with the
+same filters, candidate counts and ranking rules. SQLite documents both
+[deferring expensive work until after sorting](https://sqlite.org/optoverview.html#using_co_routines_to_defer_work_until_after_the_sorting)
+and the [materialization fence](https://sqlite.org/lang_with.html#materialization_hints).
+The latter can still use memory or temporary disk storage. There is no new
+external dependency, model, index format or MCP action.
+
+The first prototype matched 38,400 complete intermediate candidate records,
+including scores and ordering. The final combined implementation matched
+**3,186 complete MCP responses** against the pre-optimization `8caddc9`
+checkpoint: 749 private questions, eight behavior cases, 300 SciFact questions,
+323 NFCorpus questions and 99 Godot questions at limits eight and forty, plus
+four routes for each of the 57 YOLO questions. All rankings, snippets, identity
+metadata and fingerprints matched. A separate same-agent audit decoded every
+response, checked arguments and source bindings, and replayed twelve selected
+requests. This is known-data conformance, not a new relevance judgment.
+
+The final paired timing run retained the original 12 stratified YOLO questions,
+three repetitions, alternating binary order and resident MCP endpoints. All
+288 timed search payloads matched the audited reference; no other experiment or
+build ran during measurement. Each row compares the same workflow between
+implementations, not one workflow against another.
+
+| Warm-cache Mac ARM64 MCP | Previous native | Final candidate |
+|---|---:|---:|
+| One query, 24 results: mean | 2.218 s | 1.280 s |
+| One query, 24 results: p95 | 3.338 s | 1.934 s |
+| Three queries, eight each: mean | 2.624 s | 1.595 s |
+| Three queries, eight each: p95 | 3.346 s | 2.068 s |
+
+Mean times fell 42.3% and 39.2%. Peak process RSS increased from 69.5 to
+73.7 MiB. Both workflows passed their frozen gates: mean at most 80% of baseline,
+p95 at most 110%, and no more than 32 MiB additional RSS.
+
+A separate transfer run used the same previously selected twelve questions per
+corpus, three paired repeats and two limits: 576 calls with exact payload checks.
+Mean retrieval times in milliseconds were:
+
+| Corpus | Limit 8, previous → final | Limit 40, previous → final |
+|---|---:|---:|
+| Private | 117.0 → 96.0 | 172.4 → 154.5 |
+| SciFact | 101.8 → 68.5 | 146.4 → 140.0 |
+| NFCorpus | 37.8 → 32.2 | 45.9 → 47.4 |
+| Godot | 1,264.0 → 820.0 | 2,363.8 → 1,455.4 |
+
+NFCorpus at limit forty regressed by 1.42 ms (3.1%) on mean time; p95 was nearly
+unchanged at 172.4 → 171.4 ms. All eight settings passed the original transfer
+limits of 1.10 times baseline plus 2 ms for mean and 5 ms for p95. Peak RSS
+increased by at most 6.2 MiB across these corpora. Separate audit scripts
+reconstructed selection, payload hashes, ordering, statistics and acceptance
+decisions. These tolerances are experimental gates, not a user SLA. The change
+is not faster on every workload. Timings exclude network, agent planning,
+document reading and answer generation; they do not measure cold-cache,
+Windows/Intel/Linux latency, 10-GB corpora or production capacity.
+
+The first integration attempt exposed transient SQLite lock errors in local
+query expansion and copy bookkeeping. A diagnostic with five alternating paired
+stress runs reproduced failures in both the unchanged checkpoint and prototype:
+one failed run each, containing one and two request errors respectively. That
+establishes an existing contention problem, not equal failure rates. The failed
+attempts were retained and promotion stopped until the repair passed.
+
+The repair opens shared readers read-only, uses brief 100-ms SQLite busy waits,
+and checks cancellation between bounded retries of read statements. Only the
+copy-bookkeeping transaction is retried after rollback; network requests and
+file changes are never replayed. Persistent contention still returns an error
+after its five-second retry window plus the in-flight attempt. Journal mode and
+copy-resolution rules are unchanged. This follows
+[SQLite's busy-handler semantics](https://sqlite.org/c3ref/busy_handler.html);
+the pinned driver's failed-commit rollback behavior was checked directly.
+
+Targeted tests fail on the unchanged checkpoint and pass after repair: a query
+during a bookkeeping write, bookkeeping during an active reader, cancellation
+of query/copy reads, and cancellation without committing an acknowledgement.
+Additional tests cover the retry bound, read-only escaped file paths, filtered
+candidate cutoffs, equal-score ties, replacement metadata and snippets.
+Mac ARM64 retrieval and Linux ARM64 PostgreSQL server vet/race suites passed.
+Five repeated linked-project stress runs passed, followed by the full bounded
+load: 1,000 reader keys, four communities, 128 concurrent workflows, 2,000
+query/full-read workflows, 128 distinct anchors and 8,000 uploads on two CPU
+cores with 512 MiB. Peak container memory was 388.4 MiB. The following two-server
+test passed 256 workflows and 1,024 exact variant reads across sixteen projects.
+All reported errors were zero and fixture databases were removed. These are
+synthetic content, identity and isolation checks, not natural-language relevance
+under load. The native CI matrix separately checks five platforms, their
+canonical artifacts, provider adapters and real host discovery.
+
+No search-plan runtime is integrated. Its next confirmation must also compare
+cost against the plugin's normal single-eight call, and keep each remote query
+within the server's 1,000-character limit. Static path-based merging does not
+establish reconciliation across changing findings or multiple communities.
 
 ## Evidence sufficiency probes
 

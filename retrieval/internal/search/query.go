@@ -2,13 +2,12 @@ package search
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 // Hit is one ranked query result.
@@ -160,14 +159,14 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil, match, append(warnings, "no index and rebuild unavailable; no results"), nil
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return nil, match, warnings, err
 	}
 	defer db.Close()
 	if !refresh {
 		var version string
-		if err := db.QueryRowContext(ctx, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&version); err != nil {
+		if err := indexdb.ReadRow(ctx, db, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&version); err != nil {
 			return nil, match, warnings, err
 		}
 		if version != indexFormatVersion {
@@ -190,13 +189,9 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 	if exact == "" || wordRe.FindString(exact) != exact {
 		exact = ""
 	}
-	q1 := fmt.Sprintf(`
-		SELECT docs.path, docs.title, docs.status, docs.kind, docs.grade,
-		       snippet(docs, 1, '«', '»', '…', 40),
-		       COALESCE(docmeta.evidence, ''),
-		       COALESCE(docmeta.idents, ''), docs.idents,
-		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
- COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''), COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, ''),
+	q1 := fmt.Sprintf(`WITH candidates AS MATERIALIZED (
+		SELECT docs.rowid AS candidate_rowid,
+		       (docs.status = 'superseded') AS superseded,
 		       bm25(docs, %v, %v, %v) AS score,
 		       (? <> '' AND instr(' ' || COALESCE(docmeta.idents, '') || ' ', ' ' || ? || ' ') > 0) AS exact_identifier
 		FROM docs LEFT JOIN docmeta ON docmeta.path = docs.path
@@ -212,13 +207,30 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 	}
 	// Select declared exact answers before the candidate limit too: a long
 	// authoritative document must not be crowded out by short mentions.
-	q1 += ` ORDER BY (docs.status = 'superseded') ASC, exact_identifier DESC, score LIMIT ?`
+	q1 += ` ORDER BY superseded ASC, exact_identifier DESC, score LIMIT ?`
 	fetch := opts.Limit * 20
 	if fetch < rerankFetchMin {
 		fetch = rerankFetchMin
 	}
 	args = append(args, fetch)
-	rows, err := db.QueryContext(ctx, q1, args...)
+	// Sort narrow candidate records before fetching metadata and computing
+	// snippets. Keep the selection and hydration in one SQLite snapshot.
+	q1 += `)
+		SELECT docs.path, docs.title, docs.status, docs.kind, docs.grade,
+		       snippet(docs, 1, '«', '»', '…', 40),
+		       COALESCE(docmeta.evidence, ''),
+		       COALESCE(docmeta.idents, ''), docs.idents,
+		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
+		       COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''),
+		       COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, ''),
+		       candidates.score, candidates.exact_identifier
+		FROM candidates JOIN docs ON docs.rowid = candidates.candidate_rowid
+		LEFT JOIN docmeta ON docmeta.path = docs.path
+		WHERE docs MATCH ?
+		ORDER BY candidates.superseded ASC, candidates.exact_identifier DESC,
+		         candidates.score, candidates.candidate_rowid`
+	args = append(args, match)
+	rows, err := indexdb.ReadRows(ctx, db, q1, args...)
 	if err != nil {
 		return nil, match, warnings, fmt.Errorf("query failed: %w", err)
 	}
