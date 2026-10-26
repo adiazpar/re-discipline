@@ -90,6 +90,16 @@ The best LSA variant preserving development top-eight coverage lost five
 first-place matches (311 versus 316 of 384). Plain TF-IDF's best first-place
 result lost two top-eight hits. Both were rejected before held-out evaluation.
 
+An RM3-style pseudo-relevance-feedback prototype was also rejected on development
+data. It built weighted expansion terms from the initial results and fused the
+expanded BM25 ranking with the native order. The best setting preserving 316
+first-place and 378 top-eight matches lost two top-five hits (371 versus 373).
+The only setting with 317 first-place matches lost one top-eight hit. The grid
+varied feedback documents (3/5/10), terms (10/20), original-query weight (.5/.75)
+and fusion weight (.125/.25/.5/1). This was a standalone title/body prototype
+using the same Porter tokenizer, not a reproduction of Lucene/Anserini's scoring.
+It was not added to the engine or advanced to a new holdout.
+
 The first holdout exposed a candidate-generation ceiling: two expected documents
 were absent even from the lexical top 40. A reranker cannot recover a document it
 never receives. This motivated semantic candidate retrieval.
@@ -169,6 +179,42 @@ selected ModernBERT. It was not advanced to a fresh held-out evaluation. Smaller
 parameter count did not translate into better latency here: a paired ten-query
 pilot was slower on MPS than CPU, and the full CPU run's median was 1.93 seconds
 while other experiments were running.
+
+## Public corpus transfer check
+
+The same fixed hybrid was evaluated against all 300 test claims and 5,183
+abstracts in [BEIR's SciFact distribution](https://github.com/beir-cellar/beir).
+All 339 positive relevance judgments were retained, including multiple relevant
+articles for a claim. Titles and abstracts were wrapped in Markdown with uniform
+metadata; no aliases or corpus-specific query rules were added. The official ZIP
+checksum was verified (`5f7d1de60b170fc8027bb7898e2efca1` MD5; SHA-256
+`536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165`).
+
+| Method | Relevant first | Relevant in top 5 / top 8 | nDCG@10 | Mean recall@10 |
+|---|---:|---:|---:|---:|
+| Native checkpoint | 164/300 | 230 / 246 | .6776 | .8247 |
+| Lexical + semantic fusion | 172/300 | 241 / 253 | .7067 | .8438 |
+| Fusion + ModernBERT, 1,024 tokens | 190/300 | 248 / 262 | .7542 | .8762 |
+| Same hybrid, 512 tokens | 190/300 | 250 / 262 | .7550 | .8746 |
+
+The hybrid gained 29 first-place hits and lost three. At least one judged relevant
+article reached its candidate pool for 274/300 claims. The first/top-five/top-eight
+columns count queries with any relevant hit; recall counts the fraction of all
+judged relevant articles retrieved for each query. nDCG also accounts for their
+positions. Each nDCG calculation was checked against scikit-learn independently.
+
+This check uses independently supplied judgments and a different corpus, but it
+is scientific claim retrieval, not answer generation or representative reverse
+engineering traffic. Public benchmark data may overlap a model's training or
+evaluation history; this is not a claim of uncontaminated zero-shot performance.
+No parameters were tuned on these results. The lower absolute scores demonstrate
+that the private corpus's approximately 96% first-place result cannot be promised
+for every collection or question type. Reranking measured approximately 1.86/3.15
+seconds median/p95 on MPS; these exploratory timings are not capacity guarantees.
+The 512-token variant was selected on private development data before these public
+model results were viewed. It kept every first-place hit and gained two top-five
+queries, but one secondary relevant article fell outside the top ten. The shorter
+input is a cost/coverage tradeoff, not an identical replacement.
 
 ## Native compound-word candidate
 
@@ -257,6 +303,29 @@ third to fourth in the first validation set. These checks measure ranking qualit
 not full-query latency; timing only the changed pairs would understate the cost.
 Reducing the lexical pool to 16 alongside the shorter input lost one development
 first-place match and was not selected. The candidate pool remains 20 plus eight.
+
+A subsequent paired ten-query timing check rotated five variants, with batch size
+four, float32 and four CPU threads. No other model experiment was running:
+
+| ModernBERT variant | Median / p95 inference ms |
+|---|---:|
+| MPS, 1,024 tokens, original order | 1,695 / 2,987 |
+| MPS, 1,024 tokens, length grouped | 1,267 / 2,015 |
+| MPS, 512 tokens, length grouped | 1,028 / 1,528 |
+| CPU, 512 tokens, length grouped | 2,253 / 3,306 |
+| CPU, 1,024 tokens, length grouped | 2,819 / 4,180 |
+
+The shorter grouped MPS variant's median paired speedup was 1.99x. CPU and MPS
+preserved all ten full result orders at 512 tokens, though their logits differed
+slightly. These small-sample inference timings exclude candidate retrieval,
+document embedding and model startup, and do not measure server throughput.
+
+The public harness then ran all 63 fourth-draw questions with the current native
+binary and the grouped 512-token profile. It reproduced all candidate pools and
+full result orders from the cached comparison, retaining 60 first-place and 62
+top-five/top-eight matches. Median/p95 reranking was 1.28/1.67 seconds. This larger
+check is a more useful latency observation than extrapolating the ten-query
+pilot's speedup to every query.
 
 Retrieval race tests, vet, macOS Intel tests under Rosetta, and PostgreSQL server
 race tests passed for the native candidate. Both Claude and Codex MCP adapters
@@ -370,6 +439,12 @@ describes alternative inference backends; their quality and speed must be
 measured on the deployment hardware before adopting them.
 
 The rejected statistical approach follows [scikit-learn's LSA documentation](https://scikit-learn.org/stable/modules/decomposition.html#truncated-singular-value-decomposition-and-latent-semantic-analysis).
+The feedback experiment follows the term-distribution and interpolation approach
+in [Anserini's RM3 implementation](https://github.com/castorini/anserini/blob/master/src/main/java/io/anserini/rerank/lib/Rm3Reranker.java).
+The [PARADE study](https://arxiv.org/abs/2008.09093) motivates evaluating document
+length and passage aggregation separately: the useful relevance signal can be
+localized or spread across passages. A shorter input performing well on this
+corpus does not establish that later passages are dispensable in general.
 [UAEval4RAG](https://aclanthology.org/2025.acl-long.415/) evaluates answerable and
 unanswerable requests separately, supporting a separate answerability evaluation
 instead of treating a high retrieval rank as proof of an answer.
