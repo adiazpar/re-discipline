@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 // LookupCopies reads metadata for selected identities even when the current
@@ -25,7 +27,7 @@ func LookupCopies(ctx context.Context, root string, ids []string) ([]Hit, error)
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := db.QueryContext(ctx, `SELECT path,finding_id,fingerprint,status,kind,created_at,knowledge_updated_at FROM docmeta WHERE finding_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY path`, args...)
+	rows, err := indexdb.ReadRows(ctx, db, `SELECT path,finding_id,fingerprint,status,kind,created_at,knowledge_updated_at FROM docmeta WHERE finding_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY path`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +55,7 @@ func ReadRemoteCopyStates(ctx context.Context, db *sql.DB, ids []string) ([]Remo
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,fingerprint,generation FROM remote_records WHERE id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
+	rows, err := indexdb.ReadRows(ctx, db, `SELECT id,fingerprint,generation FROM remote_records WHERE id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}

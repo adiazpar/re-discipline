@@ -3,10 +3,10 @@ package search
 import (
 	"context"
 	"database/sql"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 )
 
 // RemoteRecord stores the exact current text alongside its search entry. The
@@ -84,7 +84,7 @@ func ReadRemoteRecords(ctx context.Context, db *sql.DB, ids []string) (map[strin
 	for _, id := range ids {
 		var r RemoteRecord
 		r.ID = id
-		if err := db.QueryRowContext(ctx, `SELECT path,markdown,fingerprint,generation FROM remote_records WHERE id=?`, id).Scan(&r.Path, &r.Markdown, &r.Fingerprint, &r.Generation); err != nil {
+		if err := indexdb.ReadRow(ctx, db, `SELECT path,markdown,fingerprint,generation FROM remote_records WHERE id=?`, id).Scan(&r.Path, &r.Markdown, &r.Fingerprint, &r.Generation); err != nil {
 			return nil, err
 		}
 		out[id] = r
@@ -95,21 +95,5 @@ func ReadRemoteRecords(ctx context.Context, db *sql.DB, ids []string) (map[strin
 func ReplaceFile(src, dst string) error { return replaceFile(src, dst) }
 
 func ReadRemoteIndex(root string) (*sql.DB, error) {
-	p, err := filepath.Abs(IndexPath(root))
-	if err != nil {
-		return nil, err
-	}
-	p = filepath.ToSlash(p)
-	// SQLite file URIs require /C:/... for Windows drive paths. Without the
-	// leading slash, net/url interprets the drive/path as a URI authority.
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	u := url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro&_pragma=busy_timeout(5000)"}
-	db, err := sql.Open("sqlite", u.String())
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	return db, nil
+	return indexdb.OpenRead(IndexPath(root))
 }

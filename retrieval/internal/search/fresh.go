@@ -1,12 +1,14 @@
 package search
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 	"github.com/adiazpar/re-discipline/retrieval/internal/knowledge"
 	_ "modernc.org/sqlite"
 )
@@ -54,13 +56,13 @@ func SwapIndex(tmpPath, dstPath string) error {
 // tokenization) would otherwise serve wrong or failing queries until
 // the corpus happened to change.
 func schemaCurrent(dbPath string) bool {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := indexdb.OpenRead(dbPath)
 	if err != nil {
 		return false
 	}
 	defer db.Close()
 	var v string
-	if err := db.QueryRow(`SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&v); err != nil {
+	if err := indexdb.ReadRow(context.Background(), db, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&v); err != nil {
 		return false // table missing (pre-versioning index) or unreadable
 	}
 	return v == indexFormatVersion

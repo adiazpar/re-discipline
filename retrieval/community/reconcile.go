@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/adiazpar/re-discipline/retrieval/engine"
+	"github.com/adiazpar/re-discipline/retrieval/internal/indexdb"
 	"github.com/adiazpar/re-discipline/retrieval/internal/knowledge"
 )
 
@@ -36,7 +37,7 @@ func readCopyBases(ctx context.Context, root string, conn Connection, ids []stri
 	}
 	defer db.Close()
 	var exists int
-	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='copy_bases'`).Scan(&exists); err != nil || exists == 0 {
+	if err = indexdb.ReadRow(ctx, db, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='copy_bases'`).Scan(&exists); err != nil || exists == 0 {
 		return out, err
 	}
 	if len(ids) == 0 {
@@ -46,7 +47,7 @@ func readCopyBases(ctx context.Context, root string, conn Connection, ids []stri
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,fingerprint,sequence FROM copy_bases WHERE service=? AND community=? AND format=? AND id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
+	rows, err := indexdb.ReadRows(ctx, db, `SELECT id,fingerprint,sequence FROM copy_bases WHERE service=? AND community=? AND format=? AND id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
 	if err != nil {
 		return out, err
 	}
@@ -129,12 +130,12 @@ func rememberCopies(ctx context.Context, root string, conn Connection, entries [
 		return nil
 	}
 	defer release()
-	db, err := sql.Open("sqlite", filepath.Join(root, ".re-discipline", "index.db"))
+	db, err := indexdb.OpenWrite(filepath.Join(root, ".re-discipline", "index.db"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	return storeCopyBases(ctx, db, conn, entries)
+	return indexdb.Retry(ctx, func() error { return storeCopyBases(ctx, db, conn, entries) })
 }
 
 func copyChoice(local, remote string, sequence int64, base copyBase) (string, string) {
