@@ -613,6 +613,82 @@ lexical evidence for semantic-only candidates. The complete rerun kept every
 parameter and judgment unchanged. Median/p95 reranking was 1.39/1.77 seconds on
 MPS, excluding embedding construction and the extra explanation call.
 
+## Real technical questions with multiple required facts
+
+A further diagnostic used [FreshStack's Godot collection](https://github.com/fresh-stack/freshstack):
+all 99 human-asked questions, 325 answer nuggets and 585 positive query/passage
+judgments. The original question title and body were concatenated using the
+official loader's rule. Answers and nugget text never entered retrieval.
+These questions concern raw technical documentation and source code, which
+differs from re-discipline's curated findings.
+The query and corpus dataset revisions were respectively
+`023ac3a14caf9d6ebb13d01adcfb8fa05e5a9630` and
+`069f66dc323e163b48b10d08408d282733d4393b`.
+
+The dataset contains 25,482 rows but 25,477 unique passage IDs. Before retrieval,
+the preparation audit detected the repeated IDs and matched the official
+loader's last-value-wins dictionary behavior. Two repeated IDs had different
+text. All unique official IDs were retained, including identical text under
+different IDs; judgments were not broadened. An empty Markdown heading preserved
+the official empty title, and an index audit found no passage-content loss.
+
+The existing native checkpoint and retained L20+D8/ModernBERT512/head-five
+settings were frozen before the run. No settings were selected using these
+questions. This measures transfer of the existing short-context configuration,
+not reproduction of the benchmark's longer-context systems.
+
+| Method | Relevant first | Relevant in top eight | Mean fact coverage at eight | All facts covered at eight |
+|---|---:|---:|---:|---:|
+| Native checkpoint | 14/99 | 38/99 | 26.18% | 15/99 |
+| Hybrid with ModernBERT RRF | 18/99 | 50/99 | 32.02% | 18/99 |
+| Retained hybrid with head fusion | 25/99 | 50/99 | 32.02% | 18/99 |
+
+The retained hybrid's alpha-nDCG@10 was .2043, versus .1679 for native search.
+Its mean fact coverage at twenty was 39.68%, versus 33.50%; all required facts
+were covered at that depth for 25 versus 19 questions. Only **62/99** questions
+had any judged relevant passage in the hybrid candidate pool. For the other 37,
+reranking that pool cannot recover a relevant passage. A first relevant hit is
+not a complete answer, as the fact-coverage results demonstrate.
+
+Input truncation was substantial: 18,417 documents and 27 questions exceeded
+the embedding model's 512-token limit. At least one side was truncated in
+2,543 of 2,634 reranking pairs. Both forward hooks observed a maximum of 512
+tokens. This establishes lost model input, not that truncation caused every
+failure; candidate generation, domain mismatch and judgment coverage also need
+investigation. Longer inputs or code-specialized models require new experiments.
+
+Metrics used the pinned official FreshStack implementation with pyndeval 0.0.8
+and pytrec-eval-terrier 0.5.11. Synthetic checks verified that empty searches
+contribute zero while retaining all queries in the denominator; coverage and
+recall were independently checked with sets. A separate audit re-encoded all
+99 query vectors, reproduced the candidate pools and 396 result lists, checked
+native explanation alignment, and verified unchanged model and index hashes.
+No Recall@50 is reported because
+the hybrid returns at most 28 candidates. The benchmark's questions are human,
+but its pooled nugget/support judgments are machine-assisted, not exhaustive
+human ground truth. Later models may have seen its public sources. These
+results do not establish answer-generation accuracy or community throughput.
+No agent query reformulation or follow-up searches were performed.
+
+A separate [MMR](https://doi.org/10.1145/290941.291025) experiment tested whether
+the existing document vectors could favor complementary evidence after the
+first hit. It preserved that hit and the authority rules, then greedily combined
+min-max normalized reciprocal-rank relevance with maximum similarity to already
+selected documents. The single fixed relevance/diversity weights were .7/.3;
+no parameter grid or new model was used. The protocol was frozen before
+inspecting the Godot rankings.
+
+All 701 known private questions retained 644 first-place, 695 top-five and 699
+top-eight matches. Development MRR@8 rose from .928103 to .928537; the remaining
+317 questions' MRR was unchanged. However, SciFact nDCG@10 fell from .768179 to
+.765655, despite unchanged 203/250/262 hit counts. This failed the public
+non-regression gate. Independent audits reconstructed all 1,001 modified lists
+and cross-checked every SciFact before/after nDCG value against scikit-learn.
+The fixed diversity candidate was rejected before NFCorpus, Godot coverage,
+a new private holdout or cost testing. Diversity is not automatically an
+improvement over a relevance ranking, and preserving hit counts alone is too
+weak an acceptance rule.
+
 ## Native compound-word candidate
 
 An ordinary unmatched word can have a source phrase equivalent: for example,
