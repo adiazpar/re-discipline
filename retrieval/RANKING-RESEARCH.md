@@ -245,6 +245,16 @@ quality baseline. Both were rejected before a fresh evaluation. Token vectors
 for 3,066 distinct development candidates occupied about 124 MB; that is not a
 full-corpus or 10-GB storage estimate.
 
+A stronger single-vector encoder, `BAAI/bge-base-en-v1.5`, was then tested with
+the same 20 lexical plus eight semantic candidates. On all 638 now-known private
+questions, candidate coverage fell from 637 to 636; the lost target had already
+ranked below the prior reranker's top eight. NFCorpus candidate coverage improved
+from 247 to 255, with 11 gains and three losses. This failed the preset requirement
+of nondecreasing coverage on both collections, so it was rejected as a replacement
+before further reranking or a fresh evaluation. Its 768-dimensional private-corpus
+matrix used 38,805,504 bytes versus 19,402,752 for the smaller encoder. A larger
+model helped one collection but did not uniformly improve coverage.
+
 ## Public corpus transfer check
 
 The same fixed hybrid was evaluated against all 300 test claims and 5,183
@@ -508,6 +518,7 @@ The rejected ColBERT trial used a separate environment with sentence-transformer
 | `BAAI/bge-small-en-v1.5` | `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` | MIT |
 | `mixedbread-ai/mxbai-rerank-xsmall-v1` | `b5c6e9da73abc3711f593f705371cdbe9e0fe422` | Apache-2.0 |
 | `answerdotai/answerai-colbert-small-v1` | `934fa8bb4ce2284f4c2baa232d81aca4d076fa5e` | Apache-2.0 |
+| `BAAI/bge-base-en-v1.5` | `a5beb1e3e68b9ab74eb54cfd186867f64f240e1a` | MIT |
 
 Download pinned snapshots separately, then run entirely locally:
 
@@ -582,9 +593,10 @@ unanswerable requests separately, supporting a separate answerability evaluation
 instead of treating a high retrieval rank as proof of an answer.
 
 The public checks add independent judgments across corpora, but expose a
-remaining candidate-coverage ceiling. The next experiment targets that stage
-with a stronger embedding model while keeping the candidate count fixed; it
-must earn its extra memory and encoding cost. Before model integration, measure
+remaining candidate-coverage ceiling. Replacing the embedding model failed its
+coverage gate; the next experiment will test a wider, bounded candidate window
+with the existing models and measure its ranking quality and added work.
+Before model integration, measure
 long-document recall and ambiguous/unanswerable behavior, then test
 CPU/quantized inference, memory and concurrent server load.
 Any model/index implementation must preserve per-community authorization,
