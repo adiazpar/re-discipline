@@ -332,6 +332,30 @@ previous scores; these partial timings do not measure full-query latency.
 The original 20-plus-eight window remains selected. A larger candidate pool
 finding more positives does not establish that its final ordering is better.
 
+Another candidate-stage test used each document's best BGE-small passage score.
+It kept the existing prefix vector and reused the previously frozen later
+windows: 320 ModernBERT tokens, a 256-token step, a title prefix capped at 64
+tokens, and at most 128 later windows per document. Maximum cosine similarity
+was aggregated by document before selecting the same eight dense candidates;
+the lexical contribution, fusion and authority rules stayed fixed. This was a
+MaxP-style candidate experiment, distinct from reranking an unchanged pool.
+
+Private candidate coverage stayed at **700/701**, with no gains or losses.
+On SciFact it fell from **274 to 273 of 300**, with no gains and one loss;
+mean recall of positive judgments fell from **.899556 to .896222**. The fixed
+gate rejected it before NFCorpus, Godot or final reranking. More passage views
+can introduce distractors as well as recover evidence; this result does not
+establish whether another aggregation method would help.
+
+Independent audits reconstructed all 2,002 original and modified candidate
+pools, every one of the 4,140 later-window strings, and 48 sampled vectors from
+the pinned model. Maximum sampled embedding difference was below `3e-8`.
+No document reached the window cap; all SciFact windows fit BGE's 512-token
+limit. Extra vector storage was 1,758,720 bytes privately and 4,600,320 bytes for
+SciFact. Candidate documents remained unique; these legacy-corpus checks do not
+replace finding-UUID reconciliation tests. No candidate counts here measure
+final answer correctness or server performance.
+
 The [Qwen3 0.6B reranker](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B)
 was tested next with that original pool and unchanged fusion weights. Its
 official prompt and yes-minus-no logit calculation were verified against a
@@ -983,6 +1007,28 @@ All 60 paired measurements were audited, with maximum score difference
 was rejected before full-corpus evaluation. Both native tests included
 tokenization and IPC; neither establishes the performance of quantized weights,
 other attention kernels, GPU inference or another operating system.
+
+A further fixed variant quantized the same GGUF to Q8_0 while explicitly keeping
+all `cls.*` scoring tensors in float32. The file shrank from 600,202,304 to
+162,574,400 bytes: 89 tensors used Q8_0 and 49 remained float32. Named tensors,
+canonical GGML shapes, tokenizer metadata and all retained float32 bytes were
+verified. The quantizer reordered tensors and omitted a trailing singleton
+dimension; validation accounted for that serialization change before inference.
+
+Twelve synthetic shape checks had maximum logit difference `0.0276` from Torch;
+nine tokenizer cases matched exactly and repeated native scores were identical.
+The same 20-query, three-repeat paired test then measured **4,200/6,313 ms**
+native median/p95 versus **2,547/3,839 ms** for Torch. Every input pair had matching
+token IDs. The independent audit confirmed all 60 paired measurements and
+unchanged inputs; the maximum observed real-pair logit difference was `0.2076`.
+No other model inference ran during this CPU test.
+
+Q8_0 failed the fixed no-latency-regression gate and was rejected before full
+retrieval-quality evaluation. Smaller storage did not establish faster encoder
+inference. These measurements apply to the pinned Apple M2 CPU runtime, native
+batch one and Torch batch four; they do not compare quantized and float32 native
+speed in the same paired run or establish behavior on other platforms. No
+quantized model or native model runtime was added to the plugin.
 
 Retrieval race tests, vet, macOS Intel tests under Rosetta, and PostgreSQL server
 race tests passed for the native candidate. Both Claude and Codex MCP adapters
