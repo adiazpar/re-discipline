@@ -74,6 +74,18 @@ known-validation gates used them. All 701 private questions are now known data.
 Some alternative accepted paths had appeared in earlier sets, so excluding new
 nominated source paths does not make all relevance judgments independent.
 
+A seventh set has been frozen but **not evaluated**: 48 answerable questions
+from deterministically selected sources excluding 674 prior accepted target
+paths. It includes 32 natural-language questions, eight identifier lookups and
+eight questions requiring several facts. Before any ranking, an unranked source
+review recorded 57 positive document judgments and 56 required facts; eight
+questions have multiple accepted documents. Eight separate behavior cases cover
+ambiguity, unsupported details and a false premise. They are excluded from rank
+metrics. A source/hash/selection audit passed, but semantic judgments were
+authored and reviewed by the same agent. They are not independent human labels,
+and the sources are already in the corpus. This set remains reserved for a
+candidate that passes the known-data gates.
+
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
 candidate families were compared on the same holdout; this is exploratory
@@ -527,8 +539,33 @@ the remaining private questions, public transfer or cost testing.
 The paper uses 20 context documents, so this rejection does not evaluate its
 full method. A separate 20-context/head-five protocol was fixed before inspecting
 the five-context aggregate. Its synthetic 10,878-token input passed CPU/Apple
-GPU agreement and an 8-GiB-per-counter memory bound; relevance evaluation remains
-in progress. Neither experiment changes the retained baseline.
+GPU agreement and an 8-GiB-per-counter memory bound. That variant also failed:
+first-place matches fell from **339 to 327** (nine gains, 21 losses), while
+top-five/top-eight remained 379/383 and MRR@8 fell to 0.91048. The independent
+audit reconstructed all 768 lists and verified the source projections, context
+order, clipping, prompt hashes and token counts. All permutations were valid;
+the largest observed prompt was 9,120 tokens. This bounded adaptation still
+reordered only the first five documents. It was rejected before further
+quality or cost testing. Neither experiment changes the retained baseline.
+
+A separate agreement rule is under evaluation. Within the existing first-five
+authority tier, it moves a document first only when the raw ModernBERT score
+and five-context E2Rank cosine both select it; otherwise the retained order is
+unchanged. This was a post-hoc development hypothesis after the failed
+five-context experiment, fixed before its own evaluation. There are no score
+thresholds, new weights or query-specific exceptions. On the known 384-question
+development set it improved first-place matches from **339 to 342** (five gains,
+two losses), with top-five/top-eight unchanged and MRR@8 of 0.93244. An
+independent ordering audit passed. Remaining private/public validation is in
+progress; this is not an accepted improvement or a fresh-data result.
+
+The agreement policy also permits an exact shortcut: if ModernBERT already
+selects the retained first document, E2Rank cannot change the output and need
+not run. An exhaustive 367-case winner/authority check verified that implication.
+An input-only census would require the second model on 46/701 private questions,
+48/300 SciFact questions, 126/323 NFCorpus questions and 56/99 Godot questions.
+These are invocation counts, not measured speedups. The quality run is unchanged;
+a routed runtime would still need paired-output and complete latency tests.
 
 ## Query-side lexical weighting
 
@@ -568,16 +605,38 @@ and the 20-lexical/eight-dense document budget remain unchanged.
 | Known private questions | 700/701 | 700/701 | 0 / 0 |
 | SciFact | 274/300 | 276/300 | 2 / 0 |
 | NFCorpus | 247/323 | 250/323 | 3 / 0 |
+| Godot | 62/99 | 64/99 | 2 / 0 |
 
 Mean positive-document recall also increased on both public sets. Independent
 full-dimensional solves agreed with the small-system implementation within
-5.9e-16 across all 1,324 queries; audits reconstructed all 2,648 candidate pools
+5.9e-16 across the first 1,324 queries; audits reconstructed all 2,648 candidate pools
 and checked public judgments and input hashes. Forty synthetic cases covered
 degenerate feedback, normalization and the update bound.
 
-These are candidate-coverage results, not final rankings or answer accuracy.
-Godot transfer, final reranking, a fresh holdout and deployment/cost validation
-remain required. This variant is not retained or integrated into the plugin.
+The subsequent Godot audit independently re-encoded all 99 original queries
+and reconstructed 198 candidate pools. Mean positive-document recall rose from
+0.25035 to 0.25399; mean required-fact coverage across the full candidate pool
+rose from 41.23% to 42.95%, and the number of questions with every required fact
+available rose from 25 to 26. These describe available candidates, not the
+final displayed results or generated answers.
+
+Final ranking failed the next gate. On the 384 development questions, unchanged
+ModernBERT reranking and head fusion produced **338 first-place matches versus
+339**, with one gain and two losses. Top-five/top-eight remained 379/383 and
+MRR@8 fell to 0.92680. The audit reconstructed all 768 lists and independently
+re-inferred 24 of the 281 new query/document pairs; maximum logit difference was
+below 1.8e-7. The variant stopped before the remaining private questions or
+public final-ranking tests.
+
+A separate controlled ablation kept the feedback-selected candidates but used
+the original query's dense similarity for final head scoring. This tests the
+distinction between expanded discovery and original-question relevance, also
+used in [query-decomposition pipelines](https://aclanthology.org/2025.acl-srw.32/).
+Its protocol was fixed before this second outcome, with no new thresholds or
+weights. It also produced **338 first-place matches**, now zero gains and one
+loss, with the same MRR. An independent feature/order audit passed; no extra
+model inference was needed. Both variants are rejected. The candidate-coverage
+gains did not establish a usable improvement to the complete pipeline.
 
 ## Learned sparse retrieval
 
