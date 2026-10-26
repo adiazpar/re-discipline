@@ -377,6 +377,49 @@ verified unique paths, head membership and unchanged tails. Both mixtures were
 rejected before evaluation on the other 317 questions, public collections or a
 new holdout. Cached score combinations do not establish inference latency.
 
+The [Ettin reranker release](https://huggingface.co/blog/ettin-reranker) supplied
+two further fixed candidates: the Apache-2.0 68M and 150M modular models,
+pinned respectively to `d166fa88ddde3c42bc3ee92f7df476d941c8204a` and
+`025501c4e0f9bbeb4c5b198318e0089ff061cc14`. Both ran locally with float32
+weights, 512-token pairs, batch four and length grouping. Thirteen synthetic
+pairs per model checked the actual CLS pooling and classifier modules,
+manual-versus-wrapper logits, batch ordering and CPU/MPS agreement. The largest
+CPU/MPS difference was below `4.8e-6`; no remote code or inference was used.
+
+Replacing ModernBERT throughout the reranking stages produced the following
+development results:
+
+| Model | First / top-five / top-eight, 384 questions | Decision |
+|---|---:|---|
+| Retained ModernBERT | 339 / 379 / 383 | Baseline |
+| Ettin 68M | 339 / 379 / 383 | No required improvement |
+| Ettin 150M | 343 / 378 / 382 | Coverage regression |
+
+Independent scalar audits reproduced both sets of rankings. The 68M run's
+forward hook recorded no observations because the modular wrapper invoked
+`forward` directly. Its 512-token configuration and synthetic truncation checks
+were verified, but zero is not an observed maximum length for that corpus run.
+The 150M run corrected the hook and observed a maximum of 512 tokens. Neither
+replacement advanced beyond the 384 development questions.
+
+A separately frozen cascade kept ModernBERT's first-five membership and tail,
+then used `.25 lexical + .25 dense + .5 Ettin` only to reorder those five.
+Normalization still used every member of the original candidate pool. The 68M
+cascade tied the baseline and was rejected; the 150M cascade reached
+343 / 379 / 383, with nine first-place gains and five losses. It then fell from
+**305 to 304 first-place matches on the remaining 317 known questions**, with
+three gains and four losses. Top-five and top-eight stayed at 316 each. This
+failed the predeclared non-regression gate, so the cascade was also rejected
+before public benchmarks, a fresh holdout or cost testing. Independent audits
+checked all 768 development and 634 validation result lists, including fixed
+head membership, tail order, unique paths and unchanged inputs.
+
+The cascade needs both models; timing only the additional Ettin pass would
+understate its total cost. No production or cross-platform runtime was added.
+The author used NanoBEIR and MTEB during checkpoint selection, so public
+SciFact/NFCorpus results would not constitute independent model-selection
+holdouts for these models.
+
 ## Learned sparse retrieval
 
 The [OpenSearch document-only sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill)
