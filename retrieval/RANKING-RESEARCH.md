@@ -670,6 +670,22 @@ human ground truth. Later models may have seen its public sources. These
 results do not establish answer-generation accuracy or community throughput.
 No agent query reformulation or follow-up searches were performed.
 
+A subsequent query-formulation diagnostic searched with each question's
+unchanged human-authored title alone. It kept all 99 complete-question judgments,
+the corpus, model settings and document vectors fixed; no answer or nugget text
+was supplied as a hint. This reduced the hybrid's first/top-five/top-eight hits
+from **25/40/50 to 15/25/34**, candidate coverage from **62 to 42**, and mean
+fact coverage at eight from **32.02% to 24.60%**. Alpha-nDCG@10 fell from .2043
+to .1498. Native first hits also fell from 14 to eight.
+
+The title queries avoided query-side truncation, but discarded useful question
+detail: 2,326 of 2,698 document sides still exceeded the pair budget. The
+diagnostic failed its frozen joint relevance/coverage gate. An independent
+audit re-encoded all 99 query vectors and reproduced all 396 result lists with
+unchanged assets. No shorten-the-query rule was added to the plugin. This
+rejects title-only search on these questions; it does not evaluate an agent
+that preserves important details while reformulating and searching iteratively.
+
 A separate [MMR](https://doi.org/10.1145/290941.291025) experiment tested whether
 the existing document vectors could favor complementary evidence after the
 first hit. It preserved that hit and the authority rules, then greedily combined
