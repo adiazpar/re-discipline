@@ -11,6 +11,10 @@ documents in the top five. A later score-fusion candidate improved another fresh
 63-question set from 57 to 59 first-place matches over the hybrid, preserving all
 63 in the top five. These sequential results do not establish universal coverage;
 the earlier candidate-retrieval miss remains unresolved.
+A sixth frozen 63-question draw gave the retained hybrid 59 first-place and
+63 top-five matches, versus the native candidate's 48 and 59. A later-passage
+experiment preserved those counts but failed its subsequent public transfer
+gate, so the original hybrid remains selected.
 
 The models remain offline developer experiments. They are not dependencies of
 the plugin, not shipped in its binaries, and not deployed to community servers.
@@ -57,6 +61,18 @@ questions contain 32 facts and 31 references. Their SHA-256 is
 `b55c2414d087e08f395611c4d822c239d04d5b0edf888320527e780cbc9a0d30`.
 The score-fusion weights and acceptance criterion were frozen before these
 questions were evaluated.
+
+A sixth draw used seed 20261101 and excluded 602 prior nominated or insufficient
+source paths. One of 64 selected sources lacked the requested details, leaving
+63 answerable/source-relevance questions: 31 facts and 32 references. Three
+questions had multiple acceptable passages judged before retrieval. An additional
+ambiguity probe covered several controls with identical documentation. SHA-256:
+`037856883327fa5e99e45c8498d7e1b75fdb337922e324987e3775af77d07b4b`.
+The draw and judgments remained untouched through the rejected Qwen and sparse
+trials; only the passage-selection follow-up that passed its development and
+known-validation gates used them. All 701 private questions are now known data.
+Some alternative accepted paths had appeared in earlier sets, so excluding new
+nominated source paths does not make all relevance judgments independent.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -339,6 +355,61 @@ those would not establish unseen transfer for this model. Token-only queries
 also discard word order: reversing subject and object while retaining the same
 token set produces identical sparse scores. A fast score is neither an answer
 confidence nor proof that the retrieved passage supports a claim.
+
+## Later passages in long documents
+
+The next experiment kept the original candidates and models, but allowed one
+additional passage score when the original query/document pair exceeded 512
+tokens. Later body windows contained 320 ModernBERT tokens at stride 256, with
+a title prefix capped at 64 tokens. BGE selected one later window by cosine
+similarity; the document retained the maximum of its original prefix score and
+the new passage score. Exact-identifier priority and supersession stayed intact.
+There was no window or weight grid. A 128-window cap was never reached here.
+
+This unconditional comparison gained two development first-place matches
+(341/384 versus 339), preserving 379 top-five and 383 top-eight hits. However,
+the separate known 254 questions lost one first-place match, from 246 to 245.
+It was rejected. A separately frozen follow-up only scored a later passage when
+BGE preferred it to the existing document representation. It preserved the two
+development gains and all known-validation counts, then passed the fresh check:
+
+| Sixth draw (63 questions) | First | Top 5 | Top 8 |
+|---|---:|---:|---:|
+| Native candidate | 48 | 59 | 62 |
+| Retained hybrid | 59 | 63 | 63 |
+| Hybrid with selected later passages | 59 | 63 | 63 |
+
+The follow-up changed 36 full result orders but no expected-answer ranks in the
+first eight. This is evidence of no observed relevance loss on this draw, not
+a prospective gain. Its 146 additional pairs took about 9.7 seconds in total;
+cached original scores mean this is not a complete query-latency measurement.
+Actual model inputs were checked during forward passes, with a maximum of 401
+tokens in this run. The private corpus added 1,145 windows across 685 documents,
+using 1,758,720 bytes of vectors and about 9.9 seconds of encoding time. These
+figures exclude the original document vectors and other index/model overhead.
+
+The unchanged follow-up then failed a stricter fixed transfer gate:
+
+| Known public collection | First / top 5 / top 8, unchanged | Baseline nDCG@10 | Passage nDCG@10 |
+|---|---:|---:|---:|
+| SciFact, 300 queries | 203 / 250 / 262 | .768179 | .768139 |
+| NFCorpus, 323 queries | 162 / 222 / 226 | .362749 | .362593 |
+
+Every per-query nDCG value was independently checked with scikit-learn, including
+zero-gain padding for short returned lists. These tiny declines are not evidence
+of a large general disadvantage, but they violate the preselected no-decrease
+rule and provide no public first-place gain to justify the added work. The
+passage augmentation was therefore rejected as a default. Neither variant was
+added to the public harness or plugin runtime. The result does not rule out
+properly trained passage selectors or other aggregation methods.
+
+The separate answerability checks also matter: native retrieval placed a
+nominated note first even though that note did not enumerate the requested
+fixes. Nine reference entries shared the same help text without distinguishing
+the controls' behavior. These checks establish limitations of those sources,
+not that the entire corpus lacks an answer. Ranking a topical document first
+cannot establish complete support; the agent must read it and seek additional
+evidence or state what remains unknown.
 
 ## Public corpus transfer check
 
@@ -694,11 +765,13 @@ remaining candidate-coverage ceiling. Replacing the embedding model failed its
 coverage gate; widening the candidate window improved coverage but failed its
 ranking-quality gate. A larger reranker could not improve the frozen development
 criteria. Learned document expansion made query scoring inexpensive but did not
-preserve the retained hybrid's relevance. The next trial tests bounded passage
-selection inside long documents, following the motivation in
-[Intra-Document Cascading](https://arxiv.org/abs/2105.09816). Its trained cascade
-is not equivalent to reusing our existing embedding model; that simpler variant
-needs its own quality and cost measurements.
+preserve the retained hybrid's relevance. The bounded passage experiment followed
+the motivation in [Intra-Document Cascading](https://arxiv.org/abs/2105.09816),
+whose trained cascade differs from our reuse of an existing embedding model.
+That simpler variant passed one fresh no-regression check but failed public
+transfer. Candidate-generation alternatives remain a next research direction;
+any replacement must first preserve measured candidate coverage before spending
+more compute on reranking and a new untouched holdout.
 Before model integration, measure
 long-document recall and ambiguous/unanswerable behavior, then test
 CPU/quantized inference, memory and concurrent server load.
