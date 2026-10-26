@@ -360,6 +360,23 @@ rank reconstruction, unique paths, unchanged first-five sets and unchanged
 tails. Neither family advanced to the other 317 known private questions, public
 validation, or a fresh holdout. No learned scorer was added to the plugin.
 
+An additional fixed ensemble screen tested whether the earlier small
+cross-encoders supplied complementary information. It kept the ModernBERT RRF
+stage, first-five membership, tail and authority rules, changing only the
+first-five score from `.25 lexical + .25 dense + .5 ModernBERT` to
+`.25 lexical + .25 dense + .375 ModernBERT + .125 small-model`. Every channel
+was normalized over the same complete original candidate pool; no additional
+weights were searched.
+
+Existing 512-token score caches allowed this development check without new
+inference. MiniLM produced 333 first-place matches, with two gains and eight
+losses; TinyBERT produced 332, with two gains and nine losses, versus the
+baseline's 339. Both preserved 379 top-five and 383 top-eight matches by
+construction. An independent audit reconstructed all 768 result lists and
+verified unique paths, head membership and unchanged tails. Both mixtures were
+rejected before evaluation on the other 317 questions, public collections or a
+new holdout. Cached score combinations do not establish inference latency.
+
 ## Learned sparse retrieval
 
 The [OpenSearch document-only sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill)
@@ -710,6 +727,42 @@ The official
 also lack an Intel macOS package. The last inspected release with Intel/universal
 macOS assets was 1.23.2; compatibility with that runtime or a current source build
 has not been tested. No native plugin platform support changed in these trials.
+
+A separate native-runtime experiment used the official
+[llama.cpp b11669 release](https://github.com/ggml-org/llama.cpp/releases/tag/b11669),
+pinned to `620d2225cc436ab0b001e3200e590e3b286ef9ab`. Its converter transformed
+the original ModernBERT weights into a 600,202,304-byte float32 GGUF file. A
+private C++ helper supplied explicit token sequences through the C API and read
+one classifier scalar per sequence; no HTTP service or Python inference engine
+was required by that helper. Python only orchestrated the comparison.
+
+All 12 synthetic batch/length cases agreed with Torch within `6.2e-6`. Nine
+tokenizer cases matched exactly, including Unicode, literal special tokens and
+longest-first truncation at 512 tokens. The fixed timing sample also matched
+token IDs on every query/document pair, with maximum score difference `1.15e-5`.
+These checks do not establish full-corpus ranking or cross-platform behavior.
+
+With native batch size four, the same 20-query, three-repeat alternating CPU
+test measured median/p95 reranking of **7,929/12,626 ms**, versus
+**2,496/3,725 ms** for Torch. Native tokenization, IPC, ordering and inference
+were included; candidate retrieval and startup were excluded. This experiment
+required no median or p95 regression, a separately declared native-packaging
+gate rather than the earlier ONNX 20% improvement target. It failed, so this
+configuration did not advance to full-corpus quality evaluation. The helper
+exited cleanly. Release packages for other architectures are not compatibility
+test results.
+
+A follow-up used one document pair per native encode, motivated by the pinned
+runtime's [combined-token attention matrix](https://github.com/ggml-org/llama.cpp/blob/620d2225cc436ab0b001e3200e590e3b286ef9ab/src/llama-graph.cpp).
+It retained the same model, binary, CPU threads, tokenizer and float32 attention.
+The 12 synthetic cases matched Torch within `2.2e-6`, and all nine tokenizer
+checks passed. In a separate paired run over the same 20 queries, native
+median/p95 was **3,934/6,066 ms**, versus **2,619/3,760 ms** for Torch batch four.
+All 60 paired measurements were audited, with maximum score difference
+`1.13e-5`. This configuration also failed the no-latency-regression gate and
+was rejected before full-corpus evaluation. Both native tests included
+tokenization and IPC; neither establishes the performance of quantized weights,
+other attention kernels, GPU inference or another operating system.
 
 Retrieval race tests, vet, macOS Intel tests under Rosetta, and PostgreSQL server
 race tests passed for the native candidate. Both Claude and Codex MCP adapters
