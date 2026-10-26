@@ -29,6 +29,53 @@ def rank(rows, scores, weight, k):
         -(1 / (k + i + 1) + weight / (k + positions[i]))))
 
 
+def normalize_scores(values):
+    if not values:
+        return []
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+        raise ValueError("Fusion requires finite scalar scores")
+    low, high = min(values), max(values)
+    if high == low:
+        return [0.0] * len(values)
+    return [(v - low) / (high - low) for v in values]
+
+
+def head_fusion(rows, order, lexical, semantic, neural):
+    """Frozen research candidate: reorder the first five, preserve their set.
+
+    Normalize over the entire original candidate pool. Constant channels add
+    zero; these are relative ranking features, not calibrated confidence.
+    Weights were selected on development data, not on the evaluation file.
+    """
+    size = len(rows)
+    if (sorted(order) != list(range(size)) or
+            any(len(v) != size for v in (lexical, semantic, neural))):
+        raise ValueError("Fusion features and permutation must match the candidate pool")
+    channels = [normalize_scores(v) for v in (lexical, semantic, neural)]
+    scores = [.25 * l + .25 * d + .5 * n for l, d, n in zip(*channels)]
+    head = sorted(order[:5], key=lambda i: (
+        rows[i].get("status") == "superseded", not rows[i]["exact"], -scores[i]))
+    return head + order[5:]
+
+
+def lexical_features(lexical_paths, explained, candidate_paths):
+    # CLI query expands its internal pool before calling the engine. Explain
+    # must use that same pool; otherwise scores can describe a different run.
+    if explained is None:
+        explained = []  # Native explain encodes its empty slice as JSON null.
+    if [r["path"] for r in explained[:len(lexical_paths)]] != lexical_paths:
+        raise RuntimeError("Explain order differs from query; cannot align lexical features")
+    values = {}
+    for row in explained[:len(lexical_paths)]:
+        value = row["final"]
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise RuntimeError("Explain returned an invalid lexical score")
+        # Native FTS scores are lower-is-better. Missing lexical candidates
+        # and nonnegative native scores supply zero lexical evidence.
+        values[row["path"]] = max(0.0, -value)
+    return [values.get(path, 0.0) for path in candidate_paths]
+
+
 def answer_rank(paths, expected):
     return next((i + 1 for i, p in enumerate(paths) if p in expected), 0)
 
@@ -103,6 +150,7 @@ class SemanticCandidates:
         if len(ids) != len(set(ids)):
             raise ValueError("Hybrid prototype requires at most one local copy per finding UUID")
         self.rows = [dict(path=r[0], title=r[1], status=r[3], declared=r[4] or "") for r in records]
+        self.indices = {row["path"]: i for i, row in enumerate(self.rows)}
         start = time.perf_counter()
         self.vectors = self.model.encode_document([projection(r[1], r[2]) for r in records],
                                                   normalize_embeddings=True, batch_size=args.embedding_batch_size,
@@ -132,10 +180,13 @@ class SemanticCandidates:
             r["status"] == "superseded", not r["exact"],
             -((1 / (a.dense_k + lr[r["path"]]) if r["path"] in lr else 0) +
               (a.dense_weight / (a.dense_k + dr[r["path"]]) if r["path"] in dr else 0))))
-        return rows, (time.perf_counter() - start) * 1000
+        scores = [float(similarities[self.indices[row["path"]]]) for row in rows]
+        return rows, (time.perf_counter() - start) * 1000, scores
 
 
 def main():
+    script_path = Path(__file__).resolve()
+    script_hash = sha256(script_path)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--binary", type=Path, required=True)
@@ -161,6 +212,7 @@ def main():
     p.add_argument("--fusion-depth", type=int, default=40)
     p.add_argument("--dense-weight", type=float, default=.25)
     p.add_argument("--dense-k", type=float, default=10)
+    p.add_argument("--head-fusion", action="store_true", help="Research only: reorder the first five RRF results with frozen score weights")
     a = p.parse_args()
     if not 8 <= a.shortlist <= 128 or a.max_length < 16 or min(a.batch_size, a.threads) < 1:
         p.error("shortlist must be 8–128; lengths, batch size and threads must be positive")
@@ -175,6 +227,8 @@ def main():
                               not a.shortlist <= a.fusion_depth <= 128 or
                               not 1 <= a.semantic_candidates <= a.fusion_depth):
         p.error("hybrid mode requires a local model, positive length and candidate depths within 1–128")
+    if a.head_fusion and not a.embedding_model:
+        p.error("head fusion requires the lexical + semantic candidate pool")
     raw = a.questions.read_bytes()
     cases = [json.loads(line) for line in raw.splitlines() if line.strip()]
     cases = [c for c in cases if "q" in c]
@@ -218,6 +272,7 @@ def main():
     db = sqlite3.connect(index_path.as_uri() + "?mode=ro", uri=True)
     semantic = SemanticCandidates(a, db) if a.embedding_model else None
     report = {"questions_sha256": hashlib.sha256(raw).hexdigest(),
+              "evaluator_sha256": script_hash,
               "binary_sha256": sha256(binary),
               "index_sha256": index_hash,
               "model_files_sha256": model_hashes(a.model),
@@ -228,7 +283,7 @@ def main():
     if semantic:
         report["embedding_files_sha256"] = model_hashes(a.embedding_model)
         report["embedding_build"] = semantic.build
-    for case in cases:
+    for case_number, case in enumerate(cases, 1):
         start = time.perf_counter()
         result = subprocess.run([str(binary), "query", "--root", str(root), "--sources", "local",
                                  "--baseline", "--limit", str(a.fusion_depth if semantic else a.shortlist), "--json", case["q"]],
@@ -244,8 +299,16 @@ def main():
         before = [row["path"] for row in rows]
         semantic_ms = 0
         if semantic:
-            rows, semantic_ms = semantic.candidates(case["q"], rows, exact)
+            rows, semantic_ms, semantic_scores = semantic.candidates(case["q"], rows, exact)
         candidates = [row["path"] for row in rows]
+        lexical_scores, feature_ms = [], 0
+        if a.head_fusion:
+            start = time.perf_counter()
+            pool = min(128, max(32, 4 * a.fusion_depth))
+            result = subprocess.run([str(binary), "explain", "--root", str(root), "--limit", str(pool),
+                                     "--json", case["q"]], check=True, capture_output=True, text=True, timeout=120)
+            lexical_scores = lexical_features(before, json.loads(result.stdout)["rows"], candidates)
+            feature_ms = (time.perf_counter() - start) * 1000
         pairs = []
         for row in rows:
             record = db.execute("SELECT body, docmeta.idents FROM docs LEFT JOIN docmeta ON "
@@ -259,6 +322,9 @@ def main():
         scores = score_pairs(model, pairs, a.batch_size, a.sort_by_length)
         inference_ms = (time.perf_counter() - start) * 1000
         order = rank(rows, scores, a.weight, a.rrf_k)
+        rrf_paths = [rows[i]["path"] for i in order]
+        if a.head_fusion:
+            order = head_fusion(rows, order, lexical_scores, semantic_scores, scores)
         after = [rows[i]["path"] for i in order]
         report["cases"].append(dict(case, baseline_rank=answer_rank(before[:8], case["expect"]),
                                    candidate_rank=answer_rank(candidates, case["expect"]),
@@ -266,9 +332,16 @@ def main():
                                    reranked_rank=answer_rank(after[:8], case["expect"]),
                                    baseline_paths=before, candidate_paths=candidates, reranked_paths=after, scores=scores,
                                    retrieval_ms=retrieval_ms, semantic_ms=semantic_ms, inference_ms=inference_ms))
+        if a.head_fusion:
+            report["cases"][-1].update(rrf_paths=rrf_paths, rrf_rank=answer_rank(rrf_paths[:8], case["expect"]),
+                                      lexical_scores=lexical_scores, semantic_scores=semantic_scores,
+                                      feature_ms=feature_ms)
+        if case_number % 25 == 0:
+            print(f"Evaluated {case_number}/{len(cases)} questions", flush=True)
     db.close()
-    if sha256(index_path) != index_hash or sha256(binary) != report["binary_sha256"]:
-        raise RuntimeError("Index or binary changed while evaluating; rerun on fixed inputs")
+    if (sha256(index_path) != index_hash or sha256(binary) != report["binary_sha256"] or
+            sha256(script_path) != script_hash):
+        raise RuntimeError("Index, binary or evaluator changed while evaluating; rerun on fixed inputs")
     times = sorted(c["inference_ms"] for c in report["cases"])
     report["summary"] = {
         "baseline": metrics([c["baseline_rank"] for c in report["cases"]]),
@@ -276,6 +349,10 @@ def main():
         "fusion": metrics([c["fusion_rank"] for c in report["cases"]]),
         "candidate_recall": sum(c["candidate_rank"] > 0 for c in report["cases"]),
         "inference_p50_ms": statistics.median(times), "inference_p95_ms": times[int(.95 * (len(times) - 1))]}
+    if a.head_fusion:
+        report["summary"]["rrf_before_head_fusion"] = metrics([c["rrf_rank"] for c in report["cases"]])
+        report["head_fusion"] = {"head_size": 5, "weights": {"lexical": .25, "semantic": .25, "neural": .5},
+                                 "normalization": "minmax over original candidate pool; constant channel is zero"}
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report["summary"], indent=2))

@@ -7,8 +7,10 @@ comparison, an additional frozen 80-question confirmation set improved from
 the top five. This is evidence of improvement
 on this sample, **not a guarantee for arbitrary future questions**. A subsequent
 63-question set improved from 53 to 60 first-place matches, with 62 expected
-documents in the top five. Its remaining candidate-retrieval miss demonstrates
-why the earlier perfect top-five coverage was not a universal guarantee.
+documents in the top five. A later score-fusion candidate improved another fresh
+63-question set from 57 to 59 first-place matches over the hybrid, preserving all
+63 in the top five. These sequential results do not establish universal coverage;
+the earlier candidate-retrieval miss remains unresolved.
 
 The models remain offline developer experiments. They are not dependencies of
 the plugin, not shipped in its binaries, and not deployed to community servers.
@@ -34,18 +36,27 @@ After examining that set, all 384 questions became development data. A second
 all prior answer paths. SHA-256:
 `caaa446bb307aeee785d8d474ea30927cdbdf201eea5693f6bbc22d271e7d861`.
 
-A subsequent 80-question confirmation set excluded all 432 previous nominated
-answer paths: 36 facts, 36 reference entries and the eight remaining operational
+A subsequent 80-question confirmation set excluded nominated answer paths from
+all 432 previous questions: 36 facts, 36 reference entries and the eight remaining operational
 documents, seed 20261028. SHA-256:
 `ecbf8986578d81f9c40c49bb57d0a2fc9bdeacf23e96edf78b1c804f50cec930`.
 The selected hybrid's parameters were kept unchanged for this confirmation.
 
-A fourth draw selected 64 new documents, excluding all 512 previous target paths,
+A fourth draw selected 64 new documents, excluding target paths from all 512 previous questions,
 with seed 20261029. One note contained only a topic description, so it became an
 insufficient-evidence probe before retrieval, without resampling. The remaining
 63 answerable questions comprise 31 facts and 32 reference entries. All 58
 operational documents had already been used as targets. SHA-256:
 `e41595febc448426fa16c05f7d8f2321340b9855e07aae5fc54e906ab27a8023`.
+
+A fifth draw used seed 20261030 and excluded 538 paths: the 537 distinct nominated
+paths from 575 previous questions, plus the earlier insufficient-evidence note.
+Of 64 new documents, one reference contained no help text and became a separate
+insufficiency probe before retrieval, without resampling. The 63 answerable
+questions contain 32 facts and 31 references. Their SHA-256 is
+`b55c2414d087e08f395611c4d822c239d04d5b0edf888320527e780cbc9a0d30`.
+The score-fusion weights and acceptance criterion were frozen before these
+questions were evaluated.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -180,6 +191,60 @@ parameter count did not translate into better latency here: a paired ten-query
 pilot was slower on MPS than CPU, and the full CPU run's median was 1.93 seconds
 while other experiments were running.
 
+## Score fusion and a fresh confirmation
+
+RRF uses rank positions and discards score gaps. An experiment instead min-max
+normalized native lexical scores, embedding cosine similarities and ModernBERT
+logits over the original candidate pool, then combined them. A development grid
+selected weights .25 lexical, .25 semantic and .5 neural. Applying this to the
+whole pool improved first-place matches from 335 to 339 but reduced top-five
+coverage from 379 to 377 and top-eight coverage from 383 to 378. That unrestricted
+candidate was rejected.
+
+A constrained follow-up uses those weights only to reorder the first five
+results of the established hybrid. Their membership and every position after
+fifth stay unchanged; exact-identifier authority and supersession take precedence
+over the scores. Development results were 339/379/383. Top-five/top-eight
+preservation is a consequence of this constraint, not independent evidence of
+better coverage. Constant score channels contribute zero. These normalized
+scores are relative ranking features, not answer-confidence probabilities.
+
+The already-known 48/80/63-question validation sets improved from 183 to 187
+first-place matches, with five gains and one regression. The regression moved a
+decal-distance setting from first to second. No weights were changed afterward.
+The fifth draw then provided a prospective check:
+
+| Method | First | Top 5 | Top 8 |
+|---|---:|---:|---:|
+| Current native candidate | 54/63 | 61/63 | 63/63 |
+| Lexical + semantic fusion | 55/63 | 63/63 | 63/63 |
+| ModernBERT 512-token hybrid | 57/63 | 63/63 | 63/63 |
+| Same hybrid, first-five score fusion | 59/63 | 63/63 | 63/63 |
+
+Both first-place gains were genuine changes to the nominated rank, with no
+first-place losses. One other expected path improved from fourth to third. The
+remaining misses include two pairs of differently named settings with identical
+help text, a related event with a different signature, and an explanatory article
+ahead of the requested field-frequency table. Labels were not broadened after
+inspection. This distinguishes nominated-document accuracy from whether another
+retrieved document is useful or answers the request.
+
+Median/p95 ModernBERT inference was 1.23/1.64 seconds on MPS. The research harness
+uses an additional native `explain` call to obtain aligned lexical scores; this
+cost 211/278 ms median/p95 and is reported separately. It verifies that the
+explanation matches the actual query pool and fails if it does not. No production
+latency saving or server throughput claim follows from these measurements.
+The optional `--head-fusion` flag does not alter default evaluation behavior or
+plugin retrieval.
+
+A separate late-interaction experiment with the 33.4-million-parameter
+`answerdotai/answerai-colbert-small-v1` was much faster after document encoding,
+but its best development result was 331/374/379 versus ModernBERT's 335/379/383.
+Using it to select a smaller ModernBERT shortlist also failed to preserve the
+quality baseline. Both were rejected before a fresh evaluation. Token vectors
+for 3,066 distinct development candidates occupied about 124 MB; that is not a
+full-corpus or 10-GB storage estimate.
+
 ## Public corpus transfer check
 
 The same fixed hybrid was evaluated against all 300 test claims and 5,183
@@ -196,6 +261,7 @@ checksum was verified (`5f7d1de60b170fc8027bb7898e2efca1` MD5; SHA-256
 | Lexical + semantic fusion | 172/300 | 241 / 253 | .7067 | .8438 |
 | Fusion + ModernBERT, 1,024 tokens | 190/300 | 248 / 262 | .7542 | .8762 |
 | Same hybrid, 512 tokens | 190/300 | 250 / 262 | .7550 | .8746 |
+| 512 tokens, first-five score fusion | 203/300 | 250 / 262 | .7682 | .8746 |
 
 The hybrid gained 29 first-place hits and lost three. At least one judged relevant
 article reached its candidate pool for 274/300 claims. The first/top-five/top-eight
@@ -215,6 +281,50 @@ The 512-token variant was selected on private development data before these publ
 model results were viewed. It kept every first-place hit and gained two top-five
 queries, but one secondary relevant article fell outside the top ten. The shorter
 input is a cost/coverage tradeoff, not an identical replacement.
+
+The later constrained score-fusion check reused the unchanged 512-token pair
+scores and verified every reconstructed candidate pool and original RRF order.
+It improved first-relevant hits from 190 to 203, with 19 gains and six losses.
+Its nDCG@10 gain was .0131, with exploratory paired-bootstrap interval
+[.0004, .0259]; the first-hit proportion gain was .0433, with interval
+[.0133, .0767]. These use 10,000 paired query resamples, seed 20261031, without
+adjusting for earlier candidate exploration. SciFact was already known at this
+point; this is a fixed-parameter transfer check, not a new untouched holdout.
+Reusing scores does not supply a new full-inference latency measurement.
+
+A second public check used all 323 NFCorpus test queries, 3,633 documents and
+12,334 positive graded judgments from the same BEIR distribution. The original
+titles and abstracts were preserved under uniform Markdown metadata. The official
+ZIP MD5 was `a89dba18a62ef92f7d323ec890a0d38d`, SHA-256
+`efe5be03f8c5b86a5870102d0599d227c8c6e2484328e68c6522560385671b0b`.
+All settings, including the constrained fusion weights, were frozen before this
+evaluation. The acceptance gate required nondecreasing first-relevant hits and
+nDCG@10 relative to the 512-token RRF hybrid.
+
+| NFCorpus method | Relevant first | Relevant in top 5 / top 8 | nDCG@10 | Mean recall@10 |
+|---|---:|---:|---:|---:|
+| Current native candidate | 147/323 | 205 / 212 | .3207 | .1498 |
+| Lexical + semantic fusion | 153/323 | 210 / 219 | .3408 | .1628 |
+| ModernBERT 512-token RRF hybrid | 159/323 | 222 / 226 | .3607 | .1693 |
+| Same hybrid, first-five score fusion | 162/323 | 222 / 226 | .3627 | .1693 |
+
+The constrained fusion passed this point-estimate gate with 11 first-place gains
+and eight losses. Its nDCG@10 gain was .0020; an exploratory 10,000-sample paired
+bootstrap interval was [-.0011, .0052]. The first-hit proportion difference was
+.0093, with interval [-.0155, .0372]. Both include zero, so this is a small observed
+gain, not strong evidence of a general advantage. Recall@10 is unchanged because
+only the first five positions are reordered. Graded nDCG uses the qrel value as
+gain, matching [trec_eval](https://github.com/usnistgov/trec_eval/blob/master/m_ndcg_cut.c),
+and was independently checked against scikit-learn for every query and method.
+
+Only 247/323 queries had any judged relevant document in the 20-plus-eight pool;
+mean recall of all positive judgments in that pool was .2032. That candidate
+ceiling matters more than small changes to the final ordering. Fifteen queries
+had no lexical hits. An initial harness run stopped because `explain` represents
+an empty result as JSON null; a regression-tested correction supplies zero
+lexical evidence for semantic-only candidates. The complete rerun kept every
+parameter and judgment unchanged. Median/p95 reranking was 1.39/1.77 seconds on
+MPS, excluding embedding construction and the extra explanation call.
 
 ## Native compound-word candidate
 
@@ -367,6 +477,9 @@ The fourth draw's excluded note illustrates this distinction directly: native
 retrieval placed it first, but reading it showed that it names the topic without
 providing the requested instructions. A rank-one hit would have been a misleading
 success label if answerability had not been checked before retrieval.
+The fifth draw likewise excluded a variable entry with no help text before
+asking the system for its supported values; a name match would not supply those
+missing semantics.
 
 ## Reproduction
 
@@ -384,6 +497,8 @@ been validated through the plugin on every supported OS.
 The CPU backend comparison additionally used optimum 2.1.0, optimum-onnx 0.1.0,
 onnx 1.23.2 and onnxruntime 1.31.0. Graph export, O3 optimization and ARM64 dynamic
 quantization followed the official efficiency documentation linked below.
+The rejected ColBERT trial used a separate environment with sentence-transformers
+6.0.0 and transformers 5.20.2; it did not change the hybrid's environment.
 
 | Model | Pinned snapshot | License |
 |---|---|---|
@@ -392,6 +507,7 @@ quantization followed the official efficiency documentation linked below.
 | `Alibaba-NLP/gte-reranker-modernbert-base` | `f7481e6055501a30fb19d090657df9ec1f79ab2c` | Apache-2.0 |
 | `BAAI/bge-small-en-v1.5` | `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a` | MIT |
 | `mixedbread-ai/mxbai-rerank-xsmall-v1` | `b5c6e9da73abc3711f593f705371cdbe9e0fe422` | Apache-2.0 |
+| `answerdotai/answerai-colbert-small-v1` | `934fa8bb4ce2284f4c2baa232d81aca4d076fa5e` | Apache-2.0 |
 
 Download pinned snapshots separately, then run entirely locally:
 
@@ -410,12 +526,16 @@ python scripts/evaluate-reranker.py \
 ```
 
 Use `--device cpu` where appropriate. Omit embedding arguments for lexical-only
-reranking. Torch uses explicit float32; `--attention auto` supports architectures
+reranking. To reproduce the newer constrained fusion experiment, use
+`--max-length 512 --head-fusion` with the same other hybrid settings. It records
+both the original RRF order and the changed order, together with aligned feature
+scores. Torch uses explicit float32; `--attention auto` supports architectures
 without SDPA, while `--attention sdpa` can pin that implementation for supported
 models. The report records the actual attention implementation. For a previously
 exported local CPU graph, use `--backend onnx` and
 `--onnx-file onnx/model_int8_arm64.onnx` with its containing directory as `--model`.
-The harness does not export or download graphs. It checks that the index and binary stay fixed, hashes model
+The harness does not export or download graphs. It checks that the index, binary
+and evaluator stay fixed, hashes model
 files and questions, records actual candidate recall, and never inserts expected
 answers into the result pool. Its one-vector-per-document projection truncates
 long documents; long-document chunking needs separate evaluation.
@@ -423,7 +543,8 @@ long documents; long-document chunking needs separate evaluation.
 Dependency-free evaluation-contract tests run in all five native CI environments.
 They check score/document alignment after batching, invalid model outputs,
 authority and supersession ordering, multiple pre-judged answers and preservation
-of scope when removing local evidence. They do not establish that model inference
+of scope when removing local evidence, along with first-five membership and tail
+preservation during score fusion. They do not establish that model inference
 works or performs equally on every platform.
 
 ## Research basis and next gate
@@ -438,6 +559,17 @@ documents the larger model. [Sentence Transformers' efficiency documentation](ht
 describes alternative inference backends; their quality and speed must be
 measured on the deployment hardware before adopting them.
 
+[Bruch, Gai and Ingber's fusion analysis](https://www.pinecone.io/research/an-analysis-of-fusion-functions-for-hybrid-retrieval/md/)
+motivated the convex-score experiment. Its published result is a reason to test
+the method, not evidence that our chosen weights generalize. The rejected
+late-interaction trial followed the [Answer.AI model card](https://huggingface.co/answerdotai/answerai-colbert-small-v1)
+and [Sentence Transformers' multi-vector encoder documentation](https://sbert.net/docs/multi_vector_encoder/usage/usage.html).
+Adaptive alternatives were researched but not transplanted into the current
+model: [E2Rank](https://www.pinecone.io/research/e2rank-efficient-and-effective-layer-wise-reranking/md/)
+uses trained intermediate transformer outputs, while [AcuRank](https://arxiv.org/abs/2505.18512)
+uses repeated listwise LLM comparisons and a probabilistic rating model. Neither
+is equivalent to thresholding this pointwise reranker's raw logit.
+
 The rejected statistical approach follows [scikit-learn's LSA documentation](https://scikit-learn.org/stable/modules/decomposition.html#truncated-singular-value-decomposition-and-latent-semantic-analysis).
 The feedback experiment follows the term-distribution and interpolation approach
 in [Anserini's RM3 implementation](https://github.com/castorini/anserini/blob/master/src/main/java/io/anserini/rerank/lib/Rm3Reranker.java).
@@ -449,9 +581,12 @@ corpus does not establish that later passages are dispensable in general.
 unanswerable requests separately, supporting a separate answerability evaluation
 instead of treating a high retrieval rank as proof of an answer.
 
-Before model integration: freeze a larger independently judged set across
-different corpora, measure long-document recall and ambiguous/unanswerable
-behavior, then test CPU/quantized inference, memory and concurrent server load.
+The public checks add independent judgments across corpora, but expose a
+remaining candidate-coverage ceiling. The next experiment targets that stage
+with a stronger embedding model while keeping the candidate count fixed; it
+must earn its extra memory and encoding cost. Before model integration, measure
+long-document recall and ambiguous/unanswerable behavior, then test
+CPU/quantized inference, memory and concurrent server load.
 Any model/index implementation must preserve per-community authorization,
 current-copy reconciliation, cancellation and bounded work. Better benchmark
 scores alone do not satisfy that deployment gate.

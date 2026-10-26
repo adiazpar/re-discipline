@@ -71,6 +71,46 @@ class EvaluationIntegrityTests(unittest.TestCase):
         self.assertIn("Build 7 only.", text)
         self.assertEqual(text.count("Finding"), 1)
 
+    def test_head_fusion_preserves_membership_tail_and_score_alignment(self):
+        rows = [dict(exact=False, status="promoted") for _ in range(8)]
+        order = [4, 2, 0, 1, 3, 7, 5, 6]
+        scores = list(range(8))
+        result = evaluation.head_fusion(rows, order, scores, scores, scores)
+        self.assertEqual(result, [4, 3, 2, 1, 0, 7, 5, 6])
+        self.assertEqual(set(result[:5]), set(order[:5]))
+        self.assertEqual(result[5:], order[5:])
+        # A flat score channel must neither divide by zero nor shuffle ties.
+        self.assertEqual(evaluation.head_fusion(rows, order, [3] * 8, [7] * 8, [-1] * 8), order)
+        self.assertEqual(evaluation.head_fusion([], [], [], [], []), [])
+
+    def test_head_fusion_keeps_authority_and_supersession(self):
+        rows = [dict(exact=True, status="promoted"), dict(exact=False, status="promoted"),
+                dict(exact=True, status="superseded")]
+        scores = [-10, 0, 100]
+        self.assertEqual(evaluation.head_fusion(rows, [0, 1, 2], scores, scores, scores), [0, 1, 2])
+
+    def test_head_fusion_rejects_misaligned_or_invalid_features(self):
+        rows = [dict(exact=False, status="promoted") for _ in range(2)]
+        for order, values in [([0, 0], [1, 2]), ([0, 1], [1]),
+                              ([0, 1], [1, float("nan")]), ([0, 1], [float("inf"), 2])]:
+            with self.subTest(order=order, values=values), self.assertRaises(ValueError):
+                evaluation.head_fusion(rows, order, values, [1, 2], [1, 2])
+        self.assertEqual(evaluation.normalize_scores([-5, 0, 5]), [0, .5, 1])
+
+    def test_lexical_features_only_use_the_actual_query_pool(self):
+        explained = [dict(path="a", final=-4), dict(path="b", final=1), dict(path="c", final=-2)]
+        self.assertEqual(evaluation.lexical_features(["a", "b"], explained, ["c", "a", "b"]), [0, 4, 0])
+        with self.assertRaisesRegex(RuntimeError, "order differs"):
+            evaluation.lexical_features(["b", "a"], explained, ["a", "b"])
+        with self.assertRaisesRegex(RuntimeError, "invalid lexical"):
+            evaluation.lexical_features(["a"], [dict(path="a", final=float("nan"))], ["a"])
+
+    def test_semantic_only_candidates_receive_zero_lexical_evidence(self):
+        self.assertEqual(evaluation.lexical_features([], None, ["semantic-a", "semantic-b"]), [0, 0])
+        self.assertEqual(evaluation.lexical_features([], [], ["semantic-a"]), [0])
+        with self.assertRaisesRegex(RuntimeError, "order differs"):
+            evaluation.lexical_features(["a"], None, ["a"])
+
 
 if __name__ == "__main__":
     unittest.main()
