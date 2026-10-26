@@ -655,6 +655,57 @@ public GPU cost runs were not performed. The relevance gains remain evidence
 about the ranking rule; they do not override the cost failure. A more efficient
 backend would need its own numerical, relevance and complete-query cost checks.
 
+A native E2Rank attempt used pinned llama.cpp Qwen3 support, exact author token
+sequences, causal attention, last-token pooling and float32 weights/KV cache.
+Every converted tensor matched the original weights. Ten synthetic sequences
+covered empty/Unicode/special-token documents, long prompts and the exact
+4,096-token bound. Tokenization, repeated-request isolation and invalid-input
+recovery passed. However, the maximum pairwise cosine difference from PyTorch
+was 0.0001629, exceeding the frozen 0.0001 tolerance. An independent scalar
+audit confirmed the failure. This configuration was rejected before the
+conditional quantization, corpus-ranking or complete-query cost stages. It does
+not establish that every native configuration is unsuitable.
+
+## Bounded agent search plans
+
+A separate workflow experiment draws on [question decomposition](https://aclanthology.org/2025.acl-srw.32/):
+the agent writes two focused searches from the question while retaining the
+original search. This is an adaptation, not a reproduction of that paper's
+models or merged-pool reranking. The original first eight results stay fixed;
+novel results from the two follow-up lists alternate into the remaining slots,
+then the original tail fills unused slots. Both variants expose at most 24
+distinct documents, compared with the original hybrid's first 24.
+
+Twenty-four known Godot questions were selected by a label-free hash rule. All
+48 focused queries were frozen before their retrieval. The same agent authored
+and reviewed them; this is development evidence, not a blind human trial.
+
+| Document-level evidence at 24 | Original hybrid | Native-only follow-ups | Hybrid follow-ups |
+|---|---:|---:|---:|
+| Mean required-fact coverage | 0.48611 | 0.52431 | 0.57986 |
+| Questions with every required fact | 8 | 9 | 10 |
+| Questions with any relevant document | 16 | 15 | 17 |
+| Mean positive-document recall | 0.29757 | 0.33763 | 0.37513 |
+
+The native-only version failed because it lost a question's only relevant
+document. A separately frozen variant kept the exact same plans and merge rule
+but used the retained hybrid for both follow-up searches; it passed all four
+development gates. The native audit replayed all 48 searches. The hybrid audit
+reconstructed every candidate pool, feature, ranking and merge, reencoded all 48
+queries and rescored 24 pairs; both audits passed.
+
+This expands evidence coverage without improving the unchanged original first
+eight ranks. It is not an answer-accuracy result. The two native calls averaged
+2.52 seconds; the hybrid follow-up run added 7.63 seconds of query encoding,
+explanation and reranking while reusing those native results. These are partial
+development timings, excluding agent planning and reading, not a controlled
+complete-query comparison. Cost and answerability remain unresolved.
+
+For fresh-domain confirmation, all 57 FreshStack YOLO questions and 114 focused
+queries were frozen before downloading the corpus, loading relevance judgments
+or running retrieval. Only question columns were exposed during planning.
+That comparison is pending; no search-plan policy has been added to the plugin.
+
 ## Query-side lexical weighting
 
 A separate fixed-feature test followed the query-side BM25 analysis in
