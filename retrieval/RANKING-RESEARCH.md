@@ -420,6 +420,30 @@ The author used NanoBEIR and MTEB during checkpoint selection, so public
 SciFact/NFCorpus results would not constitute independent model-selection
 holdouts for these models.
 
+## Query-side lexical weighting
+
+A separate fixed-feature test followed the query-side BM25 analysis in
+[Lighting the Way for BRIGHT](https://arxiv.org/html/2509.02558v2).
+It used corpus-wide term statistics, exact token lengths, Porter/unicode61
+tokenization, `k1=0.9`, `b=0.4`, and the positive
+[Lucene IDF formula](https://lucene.apache.org/core/10_3_2/core/org/apache/lucene/search/similarities/BM25Similarity.html).
+Query and document term frequencies were both saturated, with IDF applied on
+both sides. This was an adapted feature experiment, not an Anserini reproduction.
+
+The existing candidate pool, first-five set and remaining order stayed fixed.
+The feature replaced half of the head fusion's lexical contribution: 0.125
+native lexical, 0.125 query-side BM25, 0.25 dense and 0.5 neural, each normalized
+over the original full pool. Authority rules remained unchanged.
+
+On the 384 development questions, first-place matches fell from **339 to 332**
+(four gains, eleven losses); top-five/top-eight counts stayed at 379/383 by
+construction, and MRR@8 fell from 0.928103 to 0.916471. An independent audit
+recomputed corpus statistics, feature arithmetic and all 768 before/after
+rankings; the largest score difference was below `6e-14`. The variant was
+rejected before the remaining questions, public benchmarks or cost testing.
+It used cached neural scores and made no additional model calls. This does not
+evaluate query-side BM25 as a full candidate retriever for long queries.
+
 ## Learned sparse retrieval
 
 The [OpenSearch document-only sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill)
