@@ -271,6 +271,17 @@ before further reranking or a fresh evaluation. Its 768-dimensional private-corp
 matrix used 38,805,504 bytes versus 19,402,752 for the smaller encoder. A larger
 model helped one collection but did not uniformly improve coverage.
 
+A later replacement used [E5-small-v2](https://huggingface.co/intfloat/e5-small-v2),
+with its required `query: ` and `passage: ` prefixes, masked mean pooling and
+normalized 384-dimensional vectors. Its Sentence Transformers output matched a
+manual pooling check. With the same 20-plus-eight budget, it preserved candidate
+coverage at 700/701 now-known private questions, with no gains or losses. On
+NFCorpus, coverage fell from 247 to 241 queries, with one gain and seven losses;
+mean recall of positive judgments in the pool fell from .2032 to .1930. The fixed
+coverage gate therefore rejected it before reranking or another fresh draw.
+Private vector storage remained 19,402,752 bytes. Equal model dimensions and
+private coverage did not establish equal transfer quality.
+
 A wider candidate window was also rejected. A frozen comparison of 32 lexical
 plus eight semantic, 32 plus 16, and 40 plus 16 candidates selected 32 plus 16
 for its combined candidate coverage with the least additional scoring work.
@@ -687,6 +698,7 @@ hybrid's environment.
 | `BAAI/bge-base-en-v1.5` | `a5beb1e3e68b9ab74eb54cfd186867f64f240e1a` | MIT |
 | `Qwen/Qwen3-Reranker-0.6B` | `e61197ed45024b0ed8a2d74b80b4d909f1255473` | Apache-2.0 |
 | `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill` | `babf71f3c48695e2e53a978208e8aba48335e3c0` | Apache-2.0 |
+| `intfloat/e5-small-v2` | `ffb93f3bd4047442299a41ebb6fa998a38507c52` | MIT |
 
 Download pinned snapshots separately, then run entirely locally:
 
@@ -769,9 +781,11 @@ preserve the retained hybrid's relevance. The bounded passage experiment followe
 the motivation in [Intra-Document Cascading](https://arxiv.org/abs/2105.09816),
 whose trained cascade differs from our reuse of an existing embedding model.
 That simpler variant passed one fresh no-regression check but failed public
-transfer. Candidate-generation alternatives remain a next research direction;
-any replacement must first preserve measured candidate coverage before spending
-more compute on reranking and a new untouched holdout.
+transfer. E5 subsequently failed its candidate-coverage gate. Further ranking
+experiments must preserve coverage before spending more compute on reranking
+and a new untouched holdout. Improving the retained reranker's deployment cost
+is also necessary; the earlier MiniLM backend results do not establish how
+ModernBERT will behave under CPU graph export or quantization.
 Before model integration, measure
 long-document recall and ambiguous/unanswerable behavior, then test
 CPU/quantized inference, memory and concurrent server load.
