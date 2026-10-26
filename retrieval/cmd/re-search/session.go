@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/adiazpar/re-discipline/retrieval/internal/search"
 	"io"
 	"io/fs"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"time"
 )
 
-// Both hosts send the active workspace in hook stdin. Do not open an index,
-// initialize a project, or call a remote service just to display this summary.
+// Both hosts send the active workspace in hook stdin. Refresh an existing
+// project's engine without opening an index or contacting remote services.
 func writeSessionStatus(input io.Reader, output io.Writer) {
 	var event struct {
 		Cwd string `json:"cwd"`
@@ -24,10 +25,15 @@ func writeSessionStatus(input io.Reader, output io.Writer) {
 	if root == "" {
 		root, _ = os.Getwd()
 	}
+	root, err := search.FindRoot(root)
+	if err != nil {
+		return
+	}
 	rd := filepath.Join(root, ".re-discipline")
 	if info, err := os.Stat(rd); err != nil || !info.IsDir() {
 		return
 	}
+	refreshProject(root)
 	var campaigns []string
 	entries, _ := os.ReadDir(filepath.Join(rd, "active"))
 	for _, entry := range entries {

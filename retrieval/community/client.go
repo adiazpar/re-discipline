@@ -125,6 +125,13 @@ func (c *Client) callOnce(ctx context.Context, path string, payload, out any) er
 	return json.NewDecoder(io.LimitReader(res.Body, 64*1024*1024)).Decode(out)
 }
 func (c *Client) Operation(ctx context.Context, action, library string, payload, out any) error {
+	// Reader signatures never initiate deployments, including when an owner
+	// also has a normal project/community reader connection on this machine.
+	if OperatorUpdate != nil && c.Token != "" && !readOperation(action) && action != "community.connect" && action != "community.leave" {
+		if _, err := OperatorUpdate(ctx, c.URL, false); err != nil {
+			return err
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	ctx = context.WithValue(ctx, retryBudgetKey{}, &readRetryBudget{})

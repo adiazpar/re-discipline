@@ -18,7 +18,8 @@ python3 scripts/community-local.py stop
 ```
 
 Use `python` on Windows and another local Docker context when appropriate. Python,
-Docker and Compose are hosting dependencies only. Builds run inside Docker. The
+Docker and Compose are hosting dependencies only. The Linux service is bundled
+and built from the same retrieval source as the plugin. The
 helper preserves storage and operator identity, binds host loopback, and keeps
 PostgreSQL off host ports. Normal health reports `mode: ready`. Setup-only health
 is available with `up --setup-only`.
@@ -34,6 +35,10 @@ SERVER_OPERATOR_TOKEN of at least 43 characters. Generate and store these throug
 your host's secret management; never share them with readers or put them in Git.
 Configure HTTPS at a reverse proxy that preserves the public Host header. The local
 helper does not provision remote hosts or certificates.
+
+Managed deployments apply compatible updates on the owner’s next management
+operation. Register remote deployment access through SSH during setup; reader
+connections never carry it. See [updates and maintenance](docs/updates.md).
 
 The legacy `serve-local` command remains an owner-only loopback compatibility mode;
 new installations use `serve`. The production handler exposes only health and
@@ -76,8 +81,8 @@ queues shared fairly between communities, then their reader connections. One
 reader or community can borrow the entire idle pool; contenders receive turns
 based on occupied workers and measured operation cost.
 Default queue and execution waits are ten seconds each. Excess work gets 503 with
-Retry-After. The plugin retries busy reads at most twice with jitter and a bounded
-wait. Authenticated reads have no per-minute credential or shared-IP quota.
+Retry-After. The plugin retries busy or connection-interrupted reads at most twice with
+jitter and at most five seconds of retry sleep. Authenticated reads have no per-minute credential or shared-IP quota.
 Anonymous setup and invalid credentials have a separate IP abuse limit; setup or
 connection-count limits return 429. There is no fixed per-community worker cap.
 

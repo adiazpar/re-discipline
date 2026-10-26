@@ -12,3 +12,7 @@ go.sum text eol=lf
 # POSIX launcher must keep its shebang and LF endings on Windows checkouts.
 bin/re-search text eol=lf
 bin/*/re-search binary
+bin/server/*/community binary
+*.sql text eol=lf
+*.py text eol=lf
+bin/build.json text eol=lf

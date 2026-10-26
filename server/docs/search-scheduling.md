@@ -95,7 +95,7 @@ See [connection keys](connections.md) for scope, revocation and expiry.
 | Cancelled or expired waiter | Remove it immediately and free its waiting capacity; retain only bounded recent cost history. |
 | Credential revoked while waiting | PostgreSQL authorization runs again after admission and denies the operation. |
 | Slow query or client | Execution and response-write deadlines bound slot occupancy; SQLite and PostgreSQL receive cancellation. |
-| Read gets a temporary busy response | The plugin retries at most twice, with positive jitter, Retry-After support and at most five seconds of retry sleep within the caller's deadline. Longer requested waits are returned to the caller. |
+| Read gets a temporary busy response or interrupted connection | The plugin retries at most twice, with positive jitter, Retry-After support and at most five seconds of retry sleep within the caller's deadline. Longer requested waits are returned to the caller. |
 | Missing/corrupt index | A background worker rebuilds derived data; readers receive retryable 503 until it is ready. |
 
 Work already running is not preempted. A newly active community can wait for a

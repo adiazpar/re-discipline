@@ -4,11 +4,12 @@ package community
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/adiazpar/re-discipline/retrieval/buildinfo"
 	"regexp"
 	"strings"
 )
 
-const ProtocolVersion = 1
+const ProtocolVersion = buildinfo.Protocol
 
 type Request struct {
 	Action    string          `json:"action"`

@@ -10,7 +10,8 @@ python3 scripts/community-local.py stop
 
 Use `python` on Windows and omit `--context orbstack` for another local Docker
 engine. Python 3 and Docker Compose are required for hosting; ordinary plugin
-users need neither. Go builds inside Docker. The installer is local-only and
+users need neither. The Linux server executable is bundled, so deployment does
+not compile Go on the host. The installer runs on the server machine and
 refuses remote Docker contexts. It exposes `http://127.0.0.1:7346`, retains the
 PostgreSQL volume on stop, and preserves existing operator credentials on update.
 
@@ -28,7 +29,10 @@ public visibility. Readers obtain separate community-scoped credentials.
 The loopback installation is for development and cannot be reached by outside
 users. A remote deployment needs an HTTPS origin, private operator configuration,
 persistent PostgreSQL storage and the same server image. No third-party
-identity provider is required. Remote provisioning is not automated by this helper.
+identity provider is required. Machine provisioning and HTTPS are separate.
+Run the helper on a rented Linux host with `--public-url https://kb.example.com`,
+then register its installation through the owner’s existing SSH access. See
+[automatic updates](../../../server/docs/updates.md).
 
 For reproducible load testing:
 

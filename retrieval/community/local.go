@@ -11,18 +11,20 @@ import (
 	"runtime"
 )
 
-// LocalOwnerCredential is provisioned by the local hosting helper, never by a
-// project or a remote response. It is usable only at its exact loopback origin.
+// LocalOwnerCredential is provisioned by the hosting helper (or registered over
+// operator-controlled SSH), never by a project or an HTTP response. It is usable
+// only at its exact saved origin.
 type LocalOwnerCredential struct {
 	Service      string `json:"service"`
 	OwnerID      string `json:"owner_id"`
 	Token        string `json:"token"`
 	Installation string `json:"installation"`
+	SSH          string `json:"ssh,omitempty"`
 }
 
 func localOwnerToken(origin string) (string, error) {
 	u, err := url.Parse(origin)
-	if err != nil || u.Hostname() != "127.0.0.1" {
+	if err != nil || (u.Hostname() != "127.0.0.1" && u.Scheme != "https") {
 		return "", nil
 	}
 	home, err := os.UserHomeDir()

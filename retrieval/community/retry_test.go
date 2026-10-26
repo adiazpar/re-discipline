@@ -187,3 +187,36 @@ func TestSignedRetriesUseFreshProofsForSameProject(t *testing.T) {
 		}
 	})
 }
+
+func TestInterruptedReadRecoversWithoutRetryingOtherWrites(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		for _, action := range []string{"query", "knowledge.get", "community.create", "community.connect"} {
+			calls := 0
+			c := &Client{URL: "https://one.example", Token: "same-credential"}
+			c.HTTP = &http.Client{Transport: retryTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.URL.Host != "one.example" || r.Header.Get("Authorization") != "Bearer same-credential" {
+					t.Fatal("scope changed")
+				}
+				var p Request
+				json.NewDecoder(r.Body).Decode(&p)
+				if p.Community != "same-community" {
+					t.Fatal("community changed")
+				}
+				if calls == 1 {
+					return nil, io.EOF
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
+			})}
+			var out map[string]bool
+			err := c.Operation(context.Background(), action, "same-community", nil, &out)
+			if readOperation(action) {
+				if err != nil || calls != 2 || !out["ok"] {
+					t.Fatal(action, calls, err)
+				}
+			} else if err == nil || calls != 1 {
+				t.Fatal("retried unsafe write", action, calls, err)
+			}
+		}
+	})
+}

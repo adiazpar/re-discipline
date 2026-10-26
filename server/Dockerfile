@@ -10,8 +10,10 @@ FROM backend AS tests
 RUN go test -c -o /community-tests .
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETARCH
 WORKDIR /app
-COPY --from=backend /community /app/community
-ENV CACHE_DIR=/tmp/re-community-search PORT=8080
+COPY bin/server/linux-${TARGETARCH}/community /app/community
+COPY --chown=65532:65532 bin/build.json /cache/build.json
+ENV CACHE_DIR=/cache PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["/app/community"]

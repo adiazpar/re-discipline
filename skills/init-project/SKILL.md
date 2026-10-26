@@ -48,6 +48,10 @@ Re-running init refreshes `CONVENTIONS.md`, `.gitignore`, and the project
 binary from the plugin (these three are plugin-owned copies); everything else
 is user data — never touch it.
 
+Existing project binaries also refresh at session start or first tool use after
+a plugin update. Do not require initialization solely to update an engine.
+Initialization still creates new projects and refreshes conventions/instructions.
+
 ## 2. Shared memory decision
 
 Read the policy line from the marker block in root `AGENTS.md` (the

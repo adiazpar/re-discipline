@@ -113,6 +113,7 @@ revoke that connection and establish a new one after securing the device.
 Migration 019 retires the unreleased bearer-reader table. Public projects reconnect
 with a project key; private projects receive a new single-use invitation. Corpus
 records, community IDs and operator credentials remain unchanged. Old account and
-OAuth handlers are not exposed by the production service. No automatic plugin
-update on a reader's machine upgrades the server; the operator deploys an updated
-server image and applies migrations using the hosting helper or their deployment.
+OAuth handlers are not exposed by the production service. Reader plugin updates
+never upgrade a server. Registered operator deployments can apply compatible
+engine updates automatically; schema changes require explicit maintenance. See
+[the update policy](updates.md).

@@ -86,7 +86,7 @@ passes the active project's absolute path as `root`.
 For Claude, run `claude plugin list` and `claude mcp list` from the target
 project. `plugin:re-discipline:re-search` should report **Connected**.
 For Codex, run `codex plugin list --marketplace re-discipline`, then use `/mcp`
-in the CLI or inspect the plugin's tools in the desktop app. Expect ten skills
+in the CLI or inspect the plugin's tools in the desktop app. Expect six skills
 and the `query`, `symbol`, and `community` tools.
 
 To check the initialized project's local engine directly:
@@ -133,11 +133,15 @@ codex plugin marketplace upgrade re-discipline
 codex plugin add re-discipline@re-discipline
 ```
 
-Restart the host session and rerun `re-discipline:init-project` in each project.
-It refreshes the plugin-owned conventions, ignore file, native engine, and
-instruction block. Docs, campaigns, archives, golden questions, and text outside
-that block are preserved. Moving between operating systems follows the same
-initialization procedure.
+Restart the host session. MCP uses the updated bundled engine, and each existing
+project executable refreshes automatically at session start or first tool use.
+Rerun `re-discipline:init-project` when you also want updated conventions, ignore
+rules and agent instructions; user knowledge is preserved.
+
+Managed community servers check for compatible updates on the owner’s next
+management operation. Reader traffic never triggers deployment. Protocol/schema changes,
+major upgrades and unregistered legacy installations require operator maintenance.
+See [automatic updates and remote hosting](server/docs/updates.md).
 
 </details>
 
@@ -176,7 +180,7 @@ Only engine development needs Go. Run from the repository root:
 
 ```text
 go run ./scripts/build.go                 # this machine's native artifact
-go run ./scripts/build.go -all            # all five shipped artifacts
+go run ./scripts/build.go -all            # five client and two server artifacts
 go run ./scripts/build.go -all -check     # compare artifacts against source
 python3 scripts/smoke.py                  # use python on Windows
 ```
@@ -304,7 +308,7 @@ python3 scripts/community-local.py up --context orbstack
 ```
 
 Use `python` on Windows. Omit `--context orbstack` for another local Docker engine.
-The helper builds inside containers, generates private credentials, applies schema
+The helper packages a prebuilt native server, generates private credentials, applies schema
 migrations, and starts `http://127.0.0.1:7346`. Updates preserve the database and
 operator identity. PostgreSQL is not exposed on a host port. The installer enables
 the complete operator/reader API on loopback for testing; it does not publish your

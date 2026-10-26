@@ -30,6 +30,16 @@ jobs:
           go-version-file: server/go.mod
       - run: go vet ./...
       - run: go test -race ./...
+      - name: Verify canonical Linux service artifacts
+        working-directory: .
+        run: |
+          go run ./scripts/build.go -server -target linux-amd64 -check
+          go run ./scripts/build.go -server -target linux-arm64 -check
+      - name: Managed deployment upgrade with concurrent scoped readers
+        working-directory: .
+        run: |
+          python3 scripts/update-smoke.py
+          python3 scripts/update-smoke.py --ssh
       - name: Install the Linux credential service for connection tests
         run: |
           sudo apt-get update
