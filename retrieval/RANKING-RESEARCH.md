@@ -862,6 +862,56 @@ independent snapshots; path deduplication in these static benchmarks does not
 test those guarantees. Agent answerability, planning and reading costs, and
 concurrent server behavior remain separate gates.
 
+## Follow-up ranking and primary-query replacement
+
+Two separately frozen, cache-only development screens tested whether the
+previously collected focused queries could improve early ranking on the known
+57-question YOLO set. Neither changed the queries, corpus, labels or native
+retrieval implementation. Both reused audited actual MCP calls at limit eight;
+they are not fresh-question confirmation.
+
+The first used [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf):
+equal weights for the original query and two focused queries, one-based ranks,
+and the paper's fixed constant 60. Missing documents contribute zero, and ties
+retain the previous original-eight/interleaved-follow-up order. The full union
+of at most 24 documents stays unchanged. This adapts fusion across retrieval
+systems to related queries from one engine; the paper does not establish its
+effectiveness in this setting. Exact rational arithmetic and a separate integer
+common-denominator audit produced identical rankings.
+
+The second used only the first focused query from each immutable plan, compared
+with the original full question at the same eight-result budget. There was no
+choice between rewrites based on their outcomes. Each first query was 65–109
+characters; all fit the remote 1,000-character bound, whereas 30 original
+questions exceeded it. This is only a length check, not a remote request test.
+The query-side direction is motivated by
+[Rewrite–Retrieve–Read](https://aclanthology.org/2023.emnlp-main.322/);
+this experiment does not reproduce its training or answer-generation evaluation.
+
+| Known 57 questions | Original eight | Three-query RRF60 | First rewrite only |
+|---|---:|---:|---:|
+| First-place relevant document | 13 | 10 | 9 |
+| Relevant document within five | 24 | 23 | 23 |
+| Relevant document within eight | 26 | 28 | 27 |
+| MRR@8 | .3053 | .2733 | .2551 |
+| Mean required-fact coverage within eight | .2881 | .3374 | .3380 |
+| All required facts within eight | 6 | 10 | 11 |
+
+RRF gained two first-place matches and lost five; primary-query replacement
+gained two and lost six. Both failed the frozen nondecreasing first/top-five/MRR
+requirements, despite improving aggregate fact coverage within eight. RRF's
+full-union coverage stayed at .5260 by construction. Separate audit scripts
+reconstructed all source bindings, result orders, nugget/document metrics,
+paired changes and acceptance decisions without importing the evaluator.
+The RRF data have only promoted references and no declared identifiers;
+synthetic precedence checks do not establish actual UUID/version reconciliation.
+
+Both variants were rejected before controlled timing, another domain or runtime
+integration. No new inference ran. These results support retaining focused
+queries as supplementary evidence for this dataset; they do not show that
+query condensation or rank fusion never helps, nor justify selecting a method
+per question using relevance labels.
+
 ## Native SQL cost and concurrent bookkeeping
 
 Profiling 36 routes from 12 length-stratified YOLO questions separated freshness
