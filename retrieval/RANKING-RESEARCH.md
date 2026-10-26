@@ -505,6 +505,31 @@ its restricted context. Neither variant changed production behavior or added a
 plugin dependency. Model-specific redistribution terms remain unresolved; the
 checkpoint was used only in the private experiment.
 
+A separate [Alibaba E2Rank](https://arxiv.org/abs/2510.22733) experiment used
+`Alibaba-NLP/E2Rank-0.6B`, pinned at
+`7c82f7c8a74f14edcb5668ebe928d6865874afd5` (Apache-2.0). It embeds a prompt
+containing the query and candidate documents, then ranks individual document
+vectors by cosine similarity. This is distinct from the layer-wise E2Rank
+method cited below. The fixed adaptation supplied the retained first five
+documents as context and reordered only those five, preserving authority and
+the tail. Each document used at most 511 source tokens plus an explicit EOS;
+the whole prompt was bounded at 4,096 tokens. Inference used the standard local
+Qwen3 architecture in float32, without remote model code.
+
+On the 384 development questions, first-place matches fell from **339 to 325**:
+10 gains and 24 losses. Top-five/top-eight counts stayed at 379/383 by design;
+MRR@8 fell from 0.92810 to 0.90987. There were no invalid permutations. The
+independent audit reconstructed all 768 lists and checked score alignment,
+authority, unchanged membership and tails. Of 1,920 document inputs, 188 were
+clipped; none of the queries were clipped. The variant was rejected before
+the remaining private questions, public transfer or cost testing.
+
+The paper uses 20 context documents, so this rejection does not evaluate its
+full method. A separate 20-context/head-five protocol was fixed before inspecting
+the five-context aggregate. Its synthetic 10,878-token input passed CPU/Apple
+GPU agreement and an 8-GiB-per-counter memory bound; relevance evaluation remains
+in progress. Neither experiment changes the retained baseline.
+
 ## Query-side lexical weighting
 
 A separate fixed-feature test followed the query-side BM25 analysis in
@@ -528,6 +553,31 @@ rankings; the largest score difference was below `6e-14`. The variant was
 rejected before the remaining questions, public benchmarks or cost testing.
 It used cached neural scores and made no additional model calls. This does not
 evaluate query-side BM25 as a full candidate retriever for long queries.
+
+## Directional dense feedback
+
+A separate candidate-stage test adapts the recent
+[DIFF preprint](https://arxiv.org/abs/2610.29464). It uses five original dense
+hits to make a bounded directional correction to the existing BGE-small query
+vector. The fixed prior is 1 and maximum angle is pi/12; no parameter search,
+new model, generated text or relevance-label feedback is used. Lexical retrieval
+and the 20-lexical/eight-dense document budget remain unchanged.
+
+| Candidate coverage | Retained | DIFF variant | Gains / losses |
+|---|---:|---:|---:|
+| Known private questions | 700/701 | 700/701 | 0 / 0 |
+| SciFact | 274/300 | 276/300 | 2 / 0 |
+| NFCorpus | 247/323 | 250/323 | 3 / 0 |
+
+Mean positive-document recall also increased on both public sets. Independent
+full-dimensional solves agreed with the small-system implementation within
+5.9e-16 across all 1,324 queries; audits reconstructed all 2,648 candidate pools
+and checked public judgments and input hashes. Forty synthetic cases covered
+degenerate feedback, normalization and the update bound.
+
+These are candidate-coverage results, not final rankings or answer accuracy.
+Godot transfer, final reranking, a fresh holdout and deployment/cost validation
+remain required. This variant is not retained or integrated into the plugin.
 
 ## Learned sparse retrieval
 
