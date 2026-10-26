@@ -279,6 +279,67 @@ previous scores; these partial timings do not measure full-query latency.
 The original 20-plus-eight window remains selected. A larger candidate pool
 finding more positives does not establish that its final ordering is better.
 
+The [Qwen3 0.6B reranker](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B)
+was tested next with that original pool and unchanged fusion weights. Its
+official prompt and yes-minus-no logit calculation were verified against a
+manual forward pass, including preservation of the assistant suffix after
+truncation to 512 total tokens. This was a local float32 experiment, with no
+generated answers or remote inference.
+
+The frozen development gate required at least 339 first-place, 379 top-five and
+383 top-eight matches across 384 questions, with an improvement in at least one.
+After 350 completed questions, the candidate had 305/345/349 versus the retained
+model's 309/346/350 on that same prefix, with nine first-place gains and 13 losses.
+Even a perfect remaining 34 could only reach 339/379/383, so the run stopped:
+the required improvement was mathematically unreachable. This rejects this
+fixed replacement configuration, not every possible use of the model. The final
+34 questions were not evaluated, and no full-384 score is claimed. No fresh test
+was consumed or controlled performance comparison performed for this rejection.
+
+## Learned sparse retrieval
+
+The [OpenSearch document-only sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill)
+expands documents into weighted vocabulary terms during ingestion. Queries use
+unique tokenizer IDs and a fixed IDF table; the query process imports neither
+Torch nor Transformers. The experiment used the official double-log activation,
+masked special-token dimensions and exact float32 postings, without pruning.
+Manual and Sentence Transformers scores agreed on synthetic checks, and posting
+accumulation matched direct matrix products. This requires no OpenSearch service.
+
+Across 12,632 documents, the matrix contained 2,432,663 nonzero weights: 19.51 MB
+in CSR arrays, or 12.06 MB as a compressed NPZ. Document encoding took about
+112.6 seconds on MPS. These are this corpus's storage and encoding measurements,
+not full startup, a 10-GB projection or concurrent-server capacity. Documents
+were still truncated at 512 input tokens.
+
+| Fixed sparse experiment | First / top 5 / top 8 (384 known questions) |
+|---|---:|
+| Native comparison | 316 / 373 / 378 |
+| Retained semantic + ModernBERT hybrid | 339 / 379 / 383 |
+| Sparse alone | 266 / 355 / 362 |
+| Native + sparse RRF, weight .25 | 319 / 375 / 379 |
+| Native + sparse RRF, weight .5 | 317 / 376 / 379 |
+| Native + sparse RRF, weight 1 | 316 / 371 / 377 |
+| Sparse replaces ModernBERT scoring in the existing hybrid | 315 / 373 / 380 |
+
+The best sparse combinations improved the native comparison but failed the
+stronger retained-hybrid gate. Replacing only the expensive reranker also failed,
+with six first-place gains and 30 losses. A further constrained experiment blended
+sparse scores into the retained first-five score fusion at weights .125, .25 and
+.5. First-place counts fell to 332, 328 and 320; top-five/top-eight membership was
+preserved by construction. No sparse variant advanced to a fresh holdout or the
+plugin runtime.
+
+Token lookup and posting accumulation measured .13/.20 ms median/p95; sorting
+and calculating all four initial profiles took 4.36/5.51 ms. These timings exclude
+native queries, cold loads, ingestion and concurrency. The hybrid replacement
+still needs the BGE query encoder, so it is not an inference-free whole pipeline.
+The model card explicitly lists SciFact and NFCorpus among its training data;
+those would not establish unseen transfer for this model. Token-only queries
+also discard word order: reversing subject and object while retaining the same
+token set produces identical sparse scores. A fast score is neither an answer
+confidence nor proof that the retrieved passage supports a claim.
+
 ## Public corpus transfer check
 
 The same fixed hybrid was evaluated against all 300 test claims and 5,183
@@ -540,8 +601,9 @@ been validated through the plugin on every supported OS.
 The CPU backend comparison additionally used optimum 2.1.0, optimum-onnx 0.1.0,
 onnx 1.23.2 and onnxruntime 1.31.0. Graph export, O3 optimization and ARM64 dynamic
 quantization followed the official efficiency documentation linked below.
-The rejected ColBERT trial used a separate environment with sentence-transformers
-6.0.0 and transformers 5.20.2; it did not change the hybrid's environment.
+The rejected ColBERT and Qwen trials used a separate environment with
+sentence-transformers 6.0.0 and transformers 5.20.2; they did not change the
+hybrid's environment.
 
 | Model | Pinned snapshot | License |
 |---|---|---|
@@ -552,6 +614,8 @@ The rejected ColBERT trial used a separate environment with sentence-transformer
 | `mixedbread-ai/mxbai-rerank-xsmall-v1` | `b5c6e9da73abc3711f593f705371cdbe9e0fe422` | Apache-2.0 |
 | `answerdotai/answerai-colbert-small-v1` | `934fa8bb4ce2284f4c2baa232d81aca4d076fa5e` | Apache-2.0 |
 | `BAAI/bge-base-en-v1.5` | `a5beb1e3e68b9ab74eb54cfd186867f64f240e1a` | MIT |
+| `Qwen/Qwen3-Reranker-0.6B` | `e61197ed45024b0ed8a2d74b80b4d909f1255473` | Apache-2.0 |
+| `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill` | `babf71f3c48695e2e53a978208e8aba48335e3c0` | Apache-2.0 |
 
 Download pinned snapshots separately, then run entirely locally:
 
@@ -628,8 +692,13 @@ instead of treating a high retrieval rank as proof of an answer.
 The public checks add independent judgments across corpora, but expose a
 remaining candidate-coverage ceiling. Replacing the embedding model failed its
 coverage gate; widening the candidate window improved coverage but failed its
-ranking-quality gate. The next trial changes the reranker while retaining the
-selected pool and frozen fusion weights.
+ranking-quality gate. A larger reranker could not improve the frozen development
+criteria. Learned document expansion made query scoring inexpensive but did not
+preserve the retained hybrid's relevance. The next trial tests bounded passage
+selection inside long documents, following the motivation in
+[Intra-Document Cascading](https://arxiv.org/abs/2105.09816). Its trained cascade
+is not equivalent to reusing our existing embedding model; that simpler variant
+needs its own quality and cost measurements.
 Before model integration, measure
 long-document recall and ambiguous/unanswerable behavior, then test
 CPU/quantized inference, memory and concurrent server load.
