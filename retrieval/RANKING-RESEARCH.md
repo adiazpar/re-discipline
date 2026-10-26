@@ -1,9 +1,10 @@
 # Retrieval research loop, 2026-10-25
 
 The strongest prototype combines lexical retrieval, a small embedding model for
-additional candidates, and a cross-encoder reranker. On the final 48-question
-set, the nominated answer moved from 42 to 45 first-place matches and from 47 to
-48 top-eight matches. All 48 were in the top five. This is evidence of improvement
+additional candidates, and a cross-encoder reranker. After the 48-question
+comparison, an additional frozen 80-question confirmation set improved from
+71 to 78 first-place matches and from 77 to 80 top-eight matches. All 80 were in
+the top five. This is evidence of improvement
 on this sample, **not a guarantee for arbitrary future questions**.
 
 The models remain offline developer experiments. They are not dependencies of
@@ -29,6 +30,12 @@ After examining that set, all 384 questions became development data. A second
 48-question set used the same category proportions, seed 20261027, and excluded
 all prior answer paths. SHA-256:
 `caaa446bb307aeee785d8d474ea30927cdbdf201eea5693f6bbc22d271e7d861`.
+
+A subsequent 80-question confirmation set excluded all 432 previous nominated
+answer paths: 36 facts, 36 reference entries and the eight remaining operational
+documents, seed 20261028. SHA-256:
+`ecbf8986578d81f9c40c49bb57d0a2fc9bdeacf23e96edf78b1c804f50cec930`.
+The selected hybrid's parameters were kept unchanged for this confirmation.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -67,6 +74,12 @@ identifiers, aliases and incidental code into index columns gained only one
 development first-place match and did not justify a schema migration. Pure
 neural ranking was generally worse than combining it with the lexical order.
 
+A later corpus-only experiment compared TF-IDF cosine retrieval and latent
+semantic analysis with 64, 128 and 256 dimensions, fused with the lexical order.
+The best LSA variant preserving development top-eight coverage lost five
+first-place matches (311 versus 316 of 384). Plain TF-IDF's best first-place
+result lost two top-eight hits. Both were rejected before held-out evaluation.
+
 The first holdout exposed a candidate-generation ceiling: two expected documents
 were absent even from the lexical top 40. A reranker cannot recover a document it
 never receives. This motivated semantic candidate retrieval.
@@ -104,6 +117,27 @@ discarded without another held-out run. The smaller MiniLM hybrid improved
 top-five coverage but not first-place matches over semantic fusion alone on
 the fresh set; it remains an experimental cost/quality alternative.
 
+The locked settings then generalized to the separate 80-question confirmation:
+
+| Candidate | First | Top 5 | Top 8 |
+|---|---:|---:|---:|
+| Checkpoint | 71/80 | 77/80 | 77/80 |
+| Lexical + semantic fusion | 74/80 | 77/80 | 78/80 |
+| Fusion + ModernBERT | 78/80 | 80/80 | 80/80 |
+
+ModernBERT gained seven first-place matches and lost none against the checkpoint.
+The two remaining nominated paths ranked fourth: one question specified a
+historical overview while more focused navigation documents ranked ahead; the
+other asked whether recapturing a hill resets its timer, while timer-duration
+settings ranked ahead. No labels were revised to count those alternatives.
+
+Across the second 48 and final 80 questions, first-place matches were 123/128
+(96.1%) for the hybrid versus 113/128 (88.3%) for the checkpoint. All 128 expected
+documents were in the hybrid's top five. This aggregate combines two sequential
+agent-authored samples from one corpus, not independent confirmation across
+projects. The final confirmation's median reranking cost remained about 2.27
+seconds on MPS; quality improvements did not remove the inference cost.
+
 ## Native compound-word candidate
 
 An ordinary unmatched word can have a source phrase equivalent: for example,
@@ -119,6 +153,9 @@ from the top eight to rank 4. Totals moved from 316/373/378 to 317/374/379 for
 first/top-five/top-eight. No other rank changed. Neither fresh 48-question set
 showed an aggregate gain from this feature. It is a narrow recovery improvement,
 not evidence of general semantic understanding.
+
+The subsequent 80-question confirmation also had identical aggregate native
+scores before and after compound recovery. It did not require a schema rebuild.
 
 Independent boundary tests cover six compound forms, source-field adjacency,
 identifier authority, probe and expansion budgets, cancellation and equality
@@ -261,6 +298,11 @@ instruction; the [ModernBERT reranker card](https://huggingface.co/Alibaba-NLP/g
 documents the larger model. [Sentence Transformers' efficiency documentation](https://www.sbert.net/docs/cross_encoder/usage/efficiency.html)
 describes alternative inference backends; their quality and speed must be
 measured on the deployment hardware before adopting them.
+
+The rejected statistical approach follows [scikit-learn's LSA documentation](https://scikit-learn.org/stable/modules/decomposition.html#truncated-singular-value-decomposition-and-latent-semantic-analysis).
+[UAEval4RAG](https://aclanthology.org/2025.acl-long.415/) evaluates answerable and
+unanswerable requests separately, supporting a separate answerability evaluation
+instead of treating a high retrieval rank as proof of an answer.
 
 Before model integration: freeze a larger independently judged set across
 different corpora, measure long-document recall and ambiguous/unanswerable
