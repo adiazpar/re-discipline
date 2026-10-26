@@ -79,7 +79,7 @@ func Serve(in io.Reader, out io.Writer, version string, query QueryFunc, symbol 
 		case "tools/list":
 			resp.Result = map[string]any{"tools": []map[string]any{{
 				"name":        "query",
-				"description": "Search local knowledge and configured community sources through one ranked query. Supply the active project root so plugin launch directories cannot select another workspace. Search here before investigating. Differing remote copies can return one finding with source-labelled variants; read a variant through its community alias.",
+				"description": "Search local knowledge and configured community sources through one ranked query. Supply the active project root so plugin launch directories cannot select another workspace. Search here before investigating. Results are candidate evidence: read relevant findings and check applicability before answering; refine the query if they do not answer the question. Ranking alone does not establish an answer. Differing remote copies can return one finding with source-labelled variants; read a variant through its community alias.",
 				"inputSchema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{

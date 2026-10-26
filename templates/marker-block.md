@@ -5,6 +5,10 @@
   investigating: `{{RE_SEARCH}} query "<question>"`
 - Pass the active project's absolute `root` in retrieval MCP calls. Normal
   queries include configured community sources and optional assistance.
+- Read the relevant findings before using a search result as an answer. Check
+  applicability and source-labelled variants; refine the query when its results
+  do not answer the question. Ask for scope when the question is ambiguous, and
+  identify missing information when the knowledge base does not establish it.
 - Active campaigns (one per task): `.re-discipline/active/`
 - Conventions (doc format, curation flow): `.re-discipline/CONVENTIONS.md`
 - Shared memory: {{SHARED_MEMORY}} — durable operational recall goes in

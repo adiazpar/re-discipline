@@ -239,6 +239,9 @@ func FormatExplain(e ExplainResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "question   %s\n", e.Question)
 	fmt.Fprintf(&b, "searched   %s\n", strings.Join(e.Terms, " "))
+	if e.Match != BuildMatch(e.Question) {
+		fmt.Fprintf(&b, "expanded   %s\n", e.Match)
+	}
 	if len(e.Dropped) > 0 {
 		fmt.Fprintf(&b, "dropped    %s\n", strings.Join(e.Dropped, " "))
 	}

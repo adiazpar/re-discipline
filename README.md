@@ -461,6 +461,8 @@ re-search explain --json "what stops a demon attacking"
 Every candidate comes back with its BM25 score, query-scaled reference penalty,
 field coverage, ordered-pair boost, exact-name priority and resulting rank. An exact whole-name lookup favors the document
 that declares that identifier; broader questions retain relevance ranking.
+When an unmatched compound word has a real title/body phrase equivalent,
+`explain` also shows the expanded match expression.
 `re-search stats` prints the matching census and ranking rules in force.
 
 Both run the same code paths as a real search -- `explain` calls the ranker
@@ -472,10 +474,11 @@ knowledge base and walking two of its own questions through the ranking.
 
 ## When the doc's words are not the reader's words
 
-Search matches words, not meanings. A cvar documented by its engine help
-string says `scales the time`, and no amount of ranking will connect that to
-"how do I slow down game time" -- the two share no term. That gap is not a
-ranking bug and cannot be tuned away.
+The native engine uses lexical search. A cvar documented as `scales the time`
+may not surface for a question about "bullet time": the vocabulary differs.
+Changing ranking weights alone cannot reliably bridge that gap. Semantic
+candidate retrieval is being evaluated separately in the
+[research report](retrieval/RANKING-RESEARCH.md).
 
 `aliases:` frontmatter closes it by hand:
 
@@ -515,6 +518,11 @@ the curated facts on ordinary questions.
   above `body` (1). Unique query-word coverage and ordered word pairs in those
   fields add bounded boosts. Repeating a word does not add coverage votes.
   Partial and stemmed matches remain candidates.
+- **Missing word boundaries** can be recovered from the corpus itself:
+  an unmatched ordinary word such as `lookahead` can also search for the
+  phrase `look ahead` if that phrase occurs in a title or body. Existing words
+  and code-shaped identifiers keep their original interpretation. Expansion
+  is bounded to 32 index probes and four phrases; it uses no model or service.
 - **Exact whole-name lookups prefer declared identifiers** before score ranking
   and before the candidate limit. Short incidental mentions or aliases cannot
   crowd out the declaring document. Superseded documents still sort last, and
@@ -552,6 +560,11 @@ calling a model. Keep private question sets and result files outside this public
 repository. See [the ranking experiment](retrieval/RANKING-EXPERIMENT.md) for
 the measured improvement and its limits. A higher aggregate score does not mean
 every individual question improved.
+
+The follow-up [retrieval research report](retrieval/RANKING-RESEARCH.md) compares
+compound recovery, local rerankers and semantic candidates on fresh questions.
+Its model experiments use `scripts/evaluate-reranker.py` in a separate developer
+environment; models are not plugin dependencies or enabled in community servers.
 
 You may be tempted to give reference material its own index so it cannot
 perturb the facts at all. That was measured on a 12,152-doc corpus and

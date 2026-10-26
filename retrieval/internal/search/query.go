@@ -35,7 +35,7 @@ type QueryOptions struct {
 	Root        string
 	Assistance  string   // configured (default) or off; provider is always optional
 	Sources     string   // local, external, or both; consumed by the community client
-	Communities []string // explicit connected aliases; required when more than one is connected
+	Communities []string // explicit connected aliases; empty selects all linked communities
 	Offline     bool     // avoid remote requests; consumed by the community client
 	Limit       int      // <= 0 means 8
 	Kind        string   // filter to this kind (fact|ops|reference); empty = no filter
@@ -174,6 +174,10 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 			return nil, match, warnings, fmt.Errorf("snapshot index has an unsupported format")
 		}
 	}
+	match, err = expandCompounds(ctx, db, q, match)
+	if err != nil {
+		return nil, match, warnings, fmt.Errorf("query expansion failed: %w", err)
+	}
 	if opts.Limit <= 0 {
 		opts.Limit = 8
 	}
@@ -220,8 +224,9 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 	}
 	defer rows.Close()
 	queryTerms := map[string]bool{}
-	for _, t := range strings.Split(match, " OR ") {
-		queryTerms[strings.Trim(t, `"`)] = true
+	terms, _ := AnalyzeQuery(q)
+	for _, t := range terms {
+		queryTerms[t] = true
 	}
 	var all []ScoredHit
 	features := newFieldQuery(q)
