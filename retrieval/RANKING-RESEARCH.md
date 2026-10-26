@@ -74,7 +74,7 @@ known-validation gates used them. All 701 private questions are now known data.
 Some alternative accepted paths had appeared in earlier sets, so excluding new
 nominated source paths does not make all relevance judgments independent.
 
-A seventh set has been frozen but **not evaluated**: 48 answerable questions
+A seventh set was frozen before evaluation: 48 answerable questions
 from deterministically selected sources excluding 674 prior accepted target
 paths. It includes 32 natural-language questions, eight identifier lookups and
 eight questions requiring several facts. Before any ranking, an unranked source
@@ -83,8 +83,10 @@ questions have multiple accepted documents. Eight separate behavior cases cover
 ambiguity, unsupported details and a false premise. They are excluded from rank
 metrics. A source/hash/selection audit passed, but semantic judgments were
 authored and reviewed by the same agent. They are not independent human labels,
-and the sources are already in the corpus. This set remains reserved for a
-candidate that passes the known-data gates.
+and the sources are already in the corpus. After passing the known-data gates,
+the agreement rule described below improved first-place matches from 45 to 47,
+preserving all 48 in the first five. Those 48 questions are now known data too.
+The eight separate behavior cases remain unevaluated.
 
 These are agent-authored, document-grounded questions, not independent human
 traffic. Subject matter can overlap despite distinct target documents. Several
@@ -548,7 +550,7 @@ the largest observed prompt was 9,120 tokens. This bounded adaptation still
 reordered only the first five documents. It was rejected before further
 quality or cost testing. Neither experiment changes the retained baseline.
 
-A separate agreement rule is under evaluation. Within the existing first-five
+A separate agreement rule has passed its relevance checks. Within the existing first-five
 authority tier, it moves a document first only when the raw ModernBERT score
 and five-context E2Rank cosine both select it; otherwise the retained order is
 unchanged. This was a post-hoc development hypothesis after the failed
@@ -556,16 +558,74 @@ five-context experiment, fixed before its own evaluation. There are no score
 thresholds, new weights or query-specific exceptions. On the known 384-question
 development set it improved first-place matches from **339 to 342** (five gains,
 two losses), with top-five/top-eight unchanged and MRR@8 of 0.93244. An
-independent ordering audit passed. Remaining private/public validation is in
-progress; this is not an accepted improvement or a fresh-data result.
+independent ordering audit passed. Subsequent checks gave:
+
+| Evaluation set | First-place matches, before → after | First gains / losses | Other observations |
+|---|---|---|---|
+| Remaining 317 known private questions | 305 → 307 | 2 / 0 | Top-five/top-eight unchanged at 316/316 |
+| SciFact, 300 questions | 203 → 203 | 0 / 0 | nDCG@10 unchanged at 0.768179 |
+| NFCorpus, 323 questions | 162 → 163 | 1 / 0 | nDCG@10 0.362749 → 0.362834 |
+| Godot, 99 questions | 25 → 25 | 1 / 1 | Alpha-nDCG@10 0.2043 → 0.2045; fact coverage unchanged |
+| Seventh private set, 48 new questions | **45 → 47** | **2 / 0** | All 48 still have every required fact within the first five |
+
+On the seventh set, MRR@8 improved from 0.96354 to 0.98958. The number of
+questions whose first document supports every required fact improved from 45
+to 47. All eight questions requiring several facts retained complete first-hit
+evidence. Independent audits reconstructed the source projections, prompt hashes,
+authority rules, permutations and relevance arithmetic. The baseline audit also
+reencoded all 48 queries and rescored 24 sampled ModernBERT pairs.
+
+The fresh first-match improvement is 4.17 percentage points, but its paired
+10,000-replicate bootstrap 95% interval is 0–10.42 points; the exact paired
+two-sided binomial p-value is 0.5. Two improvements in a small, agent-authored
+sample do not establish a general success rate. No judgments or questions were
+changed after evaluation. The independent public-metric audit initially mishandled
+unreturned documents when a list contained fewer than ten hits. That audit
+adapter was corrected and checked against `pytrec_eval`; the reported rankings
+and nDCG values did not change.
+
+This is a provisional quality improvement, **not an accepted plugin default**.
+The second model still requires complete cost, answerability, supported-platform,
+community-isolation and deployment checks. No neural model has been added to the
+installed plugin or server.
 
 The agreement policy also permits an exact shortcut: if ModernBERT already
 selects the retained first document, E2Rank cannot change the output and need
 not run. An exhaustive 367-case winner/authority check verified that implication.
 An input-only census would require the second model on 46/701 private questions,
 48/300 SciFact questions, 126/323 NFCorpus questions and 56/99 Godot questions.
-These are invocation counts, not measured speedups. The quality run is unchanged;
-a routed runtime would still need paired-output and complete latency tests.
+These invocation counts motivated the separate paired-output and complete-query
+cost screen below; they do not themselves measure speedups.
+
+That routed runtime subsequently passed a small complete-query cost screen on
+this M2 Mac. Eight routed and eight skipped private queries were chosen without
+using relevance outcomes, then run three times per variant in alternating order,
+one device at a time. Each query included native retrieval/explanation, a new
+BGE query vector, dense search, all ModernBERT pairs and the conditional E2Rank
+stage. Models and the existing BGE document vectors were resident; E2Rank
+document vectors were recomputed per query. No query/result cache was used.
+
+| Complete-query cost | Retained hybrid | Agreement rule |
+|---|---:|---:|
+| CPU, weighted mean | 3.056 s | 3.293 s |
+| Apple GPU, weighted mean | 1.758 s | 1.905 s |
+| CPU, routed-query mean | 2.779 s | 6.571 s |
+| Apple GPU, routed-query mean | 1.582 s | 3.883 s |
+
+Weights use the known private corpus's 46/701 routing frequency, not observed
+user traffic. The provisional screen, fixed before timing, allowed at most 20%
+weighted mean overhead and twice the weighted p95. CPU mean overhead was 7.8%
+and GPU overhead 8.4%; both p95 checks passed. Each device's independent audit
+reconstructed all 96 timed result lists and verified routing, model-call counts,
+authority, score alignment and timing arithmetic. All selected outputs matched
+the unshortcircuited quality experiment. CPU process peak RSS was 3.23 GiB.
+
+This does not establish general throughput or small-server suitability. The
+pilot contains only 16 distinct queries, other corpora invoke the second model
+more often, and both timing variants kept all model weights resident. A separate
+precomputed-document-vector variant is pending with the same limits. Its index
+build/storage cost, public workloads, answerability, operating systems and live
+community behavior remain integration requirements.
 
 ## Query-side lexical weighting
 
@@ -903,6 +963,22 @@ audit re-encoded all 99 query vectors and reproduced all 396 result lists with
 unchanged assets. No shorten-the-query rule was added to the plugin. This
 rejects title-only search on these questions; it does not evaluate an agent
 that preserves important details while reformulating and searching iteratively.
+
+A separate source-suffix experiment preserves the original query route. Only
+when the instructed query exceeds BGE's 512-token limit does it add one fitting
+suffix of the original question and up to eight additional dense candidates.
+The original candidates remain present; no generated terms or answer hints are
+used. A tokenizer census found 27 affected Godot questions and no affected
+questions among the 701 private, 300 SciFact and 323 NFCorpus cases.
+
+The candidate-stage check preserved 62/99 questions with a relevant candidate.
+Mean positive-document recall rose from 0.25035 to 0.25502, and full-pool fact
+coverage rose from 0.41229 to 0.42071; complete-fact coverage stayed at 25
+questions. The expanded pool has at most 36 documents. An independent audit
+reencoded all 27 suffixes, verified their source boundaries and checked candidate
+selection using double-precision dot products. These are candidate-pool gains,
+not final ranking improvements. The fixed follow-up reranker and a different
+technical-domain holdout remain pending; the installed search is unchanged.
 
 A separate [MMR](https://doi.org/10.1145/290941.291025) experiment tested whether
 the existing document vectors could favor complementary evidence after the
