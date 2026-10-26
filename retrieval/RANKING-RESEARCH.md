@@ -586,8 +586,9 @@ and nDCG values did not change.
 
 This is a provisional quality improvement, **not an accepted plugin default**.
 The second model still requires complete cost, answerability, supported-platform,
-community-isolation and deployment checks. No neural model has been added to the
-installed plugin or server.
+community-isolation and deployment checks. The float32 runtime subsequently failed
+the public cost screen below. No neural model has been added to the installed
+plugin or server.
 
 The agreement policy also permits an exact shortcut: if ModernBERT already
 selects the retained first document, E2Rank cannot change the output and need
@@ -622,10 +623,37 @@ the unshortcircuited quality experiment. CPU process peak RSS was 3.23 GiB.
 
 This does not establish general throughput or small-server suitability. The
 pilot contains only 16 distinct queries, other corpora invoke the second model
-more often, and both timing variants kept all model weights resident. A separate
-precomputed-document-vector variant is pending with the same limits. Its index
-build/storage cost, public workloads, answerability, operating systems and live
-community behavior remain integration requirements.
+more often, and both timing variants kept all model weights resident.
+
+A separately frozen variant precomputes the query-independent E2Rank document
+vectors, retaining the same prompt, policy and cost limits. It also passed:
+within its paired CPU run, weighted mean time was 3.231 → 3.398 seconds (5.2%
+overhead); on the GPU it was 1.758 → 1.824 seconds (3.7%). All selected rankings
+were preserved and independently audited. Comparing the absolute totals of
+separate timing runs would confound normal run-to-run variation.
+
+The pilot built only 40 document vectors: 163,840 bytes, taking 21.7 seconds on
+CPU and 15.0 seconds on the GPU. A full 12,632-document float32 vector matrix
+would occupy 51,740,672 bytes, approximately 49 MiB; it was not built or timed.
+CPU peak RSS in this run was 3.47 GiB. Source hashes, model revision, backend and
+projection settings bind the experimental cache. Full index construction and
+invalidation, answerability, operating systems and live community behavior remain
+integration requirements.
+
+The public CPU screen then used each corpus's own routing frequency, with the
+same limits applied separately. It used eight routed and eight skipped queries
+per corpus, three paired repeats, and precomputed document vectors. SciFact
+passed: weighted mean 3.621 → 4.104 seconds (13.3% overhead), weighted p95
+4.224 → 7.135 seconds. **NFCorpus failed**: weighted mean 3.036 → 4.149 seconds
+(36.7% overhead), exceeding the frozen 20% limit. Its p95 rose from 3.782 to
+6.923 seconds and passed the separate twice-baseline limit. Independent audits
+reproduced the outputs and timing arithmetic for both runs.
+
+This rejects the precomputed-document float32 consensus runtime as a general
+default under this cost budget. Per the frozen stopping rule, Godot CPU and
+public GPU cost runs were not performed. The relevance gains remain evidence
+about the ranking rule; they do not override the cost failure. A more efficient
+backend would need its own numerical, relevance and complete-query cost checks.
 
 ## Query-side lexical weighting
 
@@ -976,9 +1004,27 @@ Mean positive-document recall rose from 0.25035 to 0.25502, and full-pool fact
 coverage rose from 0.41229 to 0.42071; complete-fact coverage stayed at 25
 questions. The expanded pool has at most 36 documents. An independent audit
 reencoded all 27 suffixes, verified their source boundaries and checked candidate
-selection using double-precision dot products. These are candidate-pool gains,
-not final ranking improvements. The fixed follow-up reranker and a different
-technical-domain holdout remain pending; the installed search is unchanged.
+selection using double-precision dot products. These candidate-pool gains did
+not survive final ranking. The fixed follow-up used the larger of each
+original/suffix ModernBERT score and dense score, preserving the original
+lexical feature and fusion rules. First/top-five hits stayed at 25/40, but
+top-eight hits fell from **50 to 49**. Alpha-nDCG@10 fell from 0.2043 to 0.2026
+and fact coverage at eight fell from 0.3202 to 0.3185. Coverage at twenty improved
+to 0.4052, which does not compensate for the failed earlier-result gates.
+
+An independent audit verified score-to-document alignment, source projection,
+native features, authority, all result orders and fact metrics; 24 new model
+pairs were rescored with identical logits. The variant was rejected before a
+fresh technical-domain holdout or cost testing. The seventh private set was
+also confirmed to fit the original query window, so this policy would leave
+its questions unchanged. No suffix-search policy was added to the plugin.
+
+A separately frozen, post-hoc ablation kept the expanded candidate pool but used
+only original-query ModernBERT and dense scores. It also failed: top-eight hits
+fell from 50 to 49, alpha-nDCG@10 from 0.2043 to 0.2031, and fact coverage at
+eight from 0.3202 to 0.3185. First/top-five counts stayed at 25/40. An independent
+audit reconstructed all rankings and metrics from the previously computed
+scores; no new model calls were needed. Both suffix variants were rejected.
 
 A separate [MMR](https://doi.org/10.1145/290941.291025) experiment tested whether
 the existing document vectors could favor complementary evidence after the
