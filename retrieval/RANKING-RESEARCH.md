@@ -323,6 +323,43 @@ fixed replacement configuration, not every possible use of the model. The final
 34 questions were not evaluated, and no full-384 score is claimed. No fresh test
 was consumed or controlled performance comparison performed for this rejection.
 
+## Learning the final score combination
+
+Two subsequent experiments learned a small ranking function from existing
+lexical, embedding and reranker signals. Neither added text inference or used
+document names, identifiers, categories or query words as prediction features.
+The ten features were the three normalized scores, their reciprocal ranks,
+three pairwise score products and the reciprocal rank from the existing RRF
+stage. Only the first-five set could be reordered; authority rules and the
+remaining results stayed fixed.
+
+Five development folds grouped questions by connected components of shared
+expected-document paths. The 384 questions formed 346 target components; no
+target crossed folds. Hyperparameters were selected using predictions for each
+fold from models trained on the other four. This remains exploratory: the
+baseline and feature design had already seen development results, and unjudged
+candidates treated as training negatives may include relevant alternatives.
+
+The first experiment used the pairwise logistic loss described in
+[RankNet](https://www.microsoft.com/en-us/research/publication/learning-to-rank-using-gradient-descent/),
+with a linear scorer, L2 regularization and equal total training weight per
+contributing query. Inverse regularization strengths `.01/.1/1/10` produced
+334/333/332/334 first-place matches, versus the retained baseline's 339.
+
+The second used [LambdaMART](https://www.microsoft.com/en-us/research/publication/from-ranknet-to-lambdarank-to-lambdamart-an-overview/)
+through LightGBM 4.7.0. Small trees learned corrections to the existing score
+combination, with its base score explicitly added during prediction. Depths
+two/three crossed with 25/75 trees produced 336/336/334/331 first-place matches.
+Exported tree evaluation matched the library within `1e-10` on the checked
+training and validation features.
+
+Both families failed the frozen requirement to exceed 339 development
+first-place matches. All variants preserved 379 top-five and 383 top-eight
+matches by construction. An independent audit checked 3,072 result lists for
+rank reconstruction, unique paths, unchanged first-five sets and unchanged
+tails. Neither family advanced to the other 317 known private questions, public
+validation, or a fresh holdout. No learned scorer was added to the plugin.
+
 ## Learned sparse retrieval
 
 The [OpenSearch document-only sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill)
@@ -366,6 +403,19 @@ those would not establish unseen transfer for this model. Token-only queries
 also discard word order: reversing subject and object while retaining the same
 token set produces identical sparse scores. A fast score is neither an answer
 confidence nor proof that the retrieved passage supports a claim.
+
+A separate [two-sided sparse model](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-v2-distill)
+then expanded both queries and documents with the same 67-million-parameter
+encoder. This requires query inference, unlike the earlier document-only trial.
+The unchanged lexical-20-plus-sparse-eight candidate budget covered 698 of 701
+private questions, versus 700 for the retained dense channel: zero gains and two
+losses. The frozen coverage gate therefore failed before final reranking.
+An independent audit reconstructed all document/query vector row mappings and
+all 701 candidate sets from cached vectors, with identical dot-product scores.
+The public stage did not complete because a candidate-list variable shadowed
+the pooling function after the private stage; that harness error was fixed and
+recorded. No public result is claimed, and the already-rejected candidate was
+not rerun merely to obtain one.
 
 ## Later passages in long documents
 
@@ -614,6 +664,53 @@ top-five/top-eight matches. Median/p95 reranking was 1.28/1.67 seconds. This lar
 check is a more useful latency observation than extrapolating the ten-query
 pilot's speedup to every query.
 
+ModernBERT was also exported to an ONNX graph to test a smaller inference
+dependency stack. A private runner uses ONNX Runtime, NumPy and the Rust-backed
+tokenizer without importing Torch or Transformers. Its pair token IDs, masks,
+512-token truncation and score alignment were checked against the original
+tokenizer. Twelve synthetic batch/sequence shapes had float32 logit differences
+below `4.3e-6`. These are numerical plumbing checks, not corpus or platform proof.
+
+A per-channel dynamic int8 MatMul variant reduced graph size from 598,997,294
+to 267,317,264 bytes, but failed retrieval quality. After 293 development
+questions it returned 248/286/292 first/top-five/top-eight matches, versus
+254/289/293 from the retained model on the same prefix. It had three first-place
+gains and nine losses, and lost three top-five matches. Even perfect results on
+the remaining 91 questions could reach only 377 top-five matches, below the
+required 379, so the run was stopped and rejected. No full-384, full-701 or public
+result is claimed for that variant, and no paired speed test was performed.
+
+The quantized model also showed batch-dependent numerical differences in the
+synthetic probe. Exact score-to-document alignment does not imply numerical
+equivalence across batch compositions. This is consistent with ONNX Runtime's
+[requirement to validate quantization accuracy](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html).
+
+The float32 run preserved all full result orders on its first 82 private
+questions, with maximum logit difference `2.93e-5`. Preliminary timings motivated
+moving the unchanged cost gate ahead of the remaining quality checks; this
+ordering amendment was recorded before the paired test. Twenty fixed, randomly
+sampled known queries were measured three times each, alternating backend order,
+with four CPU threads, batch size four, 512 tokens and length grouping:
+
+| Backend, Apple M2 CPU | Median / p95 reranking ms |
+|---|---:|
+| Retained Torch float32 | 2,763 / 4,042 |
+| ONNX float32 | 7,815 / 12,152 |
+
+These quantiles use each query's median of three repetitions. Other research
+inference was stopped or suspended during measurement. Both backends were
+resident; the approximately 2.05-GB peak is combined process memory, not an
+individual backend's footprint. The ONNX candidate failed its required 20%
+median reduction and no-p95-regression gate. Its suspended quality run was
+terminated, so no full-corpus float32 quality result is claimed. This rejects
+the tested CPU graph/runtime configuration, not every native inference option.
+
+The official
+[ONNX Runtime 1.31.0 release assets](https://github.com/microsoft/onnxruntime/releases/tag/v1.31.0)
+also lack an Intel macOS package. The last inspected release with Intel/universal
+macOS assets was 1.23.2; compatibility with that runtime or a current source build
+has not been tested. No native plugin platform support changed in these trials.
+
 Retrieval race tests, vet, macOS Intel tests under Rosetta, and PostgreSQL server
 race tests passed for the native candidate. Both Claude and Codex MCP adapters
 returned the same results with no errors. All five native artifacts were rebuilt
@@ -698,6 +795,7 @@ hybrid's environment.
 | `BAAI/bge-base-en-v1.5` | `a5beb1e3e68b9ab74eb54cfd186867f64f240e1a` | MIT |
 | `Qwen/Qwen3-Reranker-0.6B` | `e61197ed45024b0ed8a2d74b80b4d909f1255473` | Apache-2.0 |
 | `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill` | `babf71f3c48695e2e53a978208e8aba48335e3c0` | Apache-2.0 |
+| `opensearch-project/opensearch-neural-sparse-encoding-v2-distill` | `269e6638b2c4f648996691f6d751495285d8f330` | Apache-2.0 |
 | `intfloat/e5-small-v2` | `ffb93f3bd4047442299a41ebb6fa998a38507c52` | MIT |
 
 Download pinned snapshots separately, then run entirely locally:
