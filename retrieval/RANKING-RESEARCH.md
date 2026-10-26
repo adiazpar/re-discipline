@@ -682,8 +682,10 @@ the agent writes two focused searches from the question while retaining the
 original search. This is an adaptation, not a reproduction of that paper's
 models or merged-pool reranking. The original first eight results stay fixed;
 novel results from the two follow-up lists alternate into the remaining slots,
-then the original tail fills unused slots. Both variants expose at most 24
-distinct documents, compared with the original hybrid's first 24.
+then the original tail fills unused slots. Both variants select at most 24
+distinct documents for judgment, compared with the original hybrid's first 24.
+This selection budget does not count every upstream search hit shown to an
+agent; the later MCP experiment below measures that separately.
 
 Twenty-four known Godot questions were selected by a label-free hash rule. All
 48 focused queries were frozen before their retrieval. The same agent authored
@@ -780,6 +782,75 @@ These are retrieval-only measurements on a small stratified sample, not a user
 SLA, agent planning/reading cost, network cost, server-load result or permission
 to run three searches for every question. Both quality and cost comparisons use
 the frozen native checkpoint, not a new release of the installed plugin.
+
+The current native candidate was then checked on all 171 searches. Its aggregate
+rank and evidence metrics matched the frozen checkpoint; one route's ordering
+changed and was replayed separately. Next, actual stdio MCP calls used the
+current binary, an explicit isolated project root, local sources, offline mode,
+and disabled assistance. All 57 default-eight responses exactly matched CLI
+responses, including their JSON payloads. Their first eight also matched the
+larger-limit experiment. This matters because the implementation changes the
+candidate pool with the requested result limit; prefix equivalence cannot be
+assumed in general.
+
+An actual MCP original-24 plus two focused-eight check preserved the earlier
+native workflow metrics. All 171 responses exactly matched CLI calls with the
+same limits. However, the agent receives 40 tool hits before the offline
+selection of 24: mean tool-response text grew from 18,935 to 31,492 bytes.
+
+A separate development policy was frozen before those MCP workflow outcomes:
+request eight original results and eight from each focused query, retain the
+original eight, then append new follow-up results in alternating rank order.
+There is no original-tail refill. This exposes at most 24 tool hits and retains
+every unique returned document. It reuses the audited MCP outputs; these 57
+questions are now known development data, not another untouched test.
+
+| Actual MCP evidence | One query, 24 results | One query, default eight | Three queries, eight each |
+|---|---:|---:|---:|
+| Mean required-fact coverage | 0.41930 | 0.28814 | 0.52602 |
+| Questions with every required fact | 15 | 6 | 23 |
+| Questions with any relevant document | 32 | 26 | 37 |
+| Mean positive-document recall | 0.20465 | 0.12693 | 0.27248 |
+| Mean unique documents | 24.00 | 8.00 | 19.39 |
+| Mean tool-response text bytes | 18,935 | 6,535 | 19,092 |
+| Mean selected full-document bytes | 156,095 | 53,322 | 126,060 |
+
+The three-by-eight policy passed its four aggregate quality gates against the
+single 24-result search. Fact coverage improved on 15 questions and declined on
+four; complete-fact questions gained 11 and lost three. Relative to the initial
+eight, fact coverage improved on 24 questions with no losses. That latter
+monotonicity follows from keeping the original documents and is not proof that
+an agent's answer will improve. The original first-place result is unchanged.
+Separate audit scripts reconstructed all merges, metrics and byte counts from
+the recorded responses and judgments, checked every MCP/CLI pair, and replayed
+three selected MCP requests. The same agent conducted these checks.
+
+The three-by-eight policy then passed a separately frozen bounded-cost screen
+using the current native MCP endpoint. One resident process handled both arms
+on the same 12 length-stratified questions, with three paired repeats and
+alternating order: 144 searches in 36 paired observations. No other retrieval
+experiment or inference job ran during measurement. All complete response
+payloads matched the audited quality run.
+
+| Current native MCP timing | One query, 24 results | Three queries, eight each |
+|---|---:|---:|
+| Mean retrieval time | 2.230 s | 2.629 s |
+| Median retrieval time | 2.147 s | 2.576 s |
+| p95 retrieval time | 3.349 s | 3.357 s |
+| Mean selected full-document bytes | 156,001 | 119,998 |
+| Mean tool-response text bytes | 19,112 | 18,900 |
+
+Mean latency increased 17.9%; p95 increased 0.25%. Peak MCP-process RSS was
+68.7 MiB. The policy passed the earlier provisional limits for bounded extra
+work, but **failed** its separately frozen unchanged-speed screen requiring
+both mean and p95 within 10% of baseline. A separate audit reconstructed the
+selection, response equality, merging, bytes, timings and gates. These remain
+warm-cache local retrieval measurements on 12 known questions, excluding agent
+query planning, document reading and answer generation. They neither establish
+server capacity nor measure Windows/Intel/Linux latency. The older all-40 CLI
+timings are a different setup and cannot attribute a speedup to any single
+change. This is a promising tradeoff, not an accuracy-and-speed solution for
+arbitrary new questions.
 
 No search-plan policy has been added to the plugin. Integration must preserve the exact project and
 community selection on every follow-up and reconcile finding identities across
