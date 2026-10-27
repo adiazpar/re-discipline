@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.0 - 2026-10-26
 
 - Replace the `visualize` skill and HTML template with a concise `summary` skill for local knowledge statistics, retrieval settings and linked community counts. Add scoped `community.stats` with stored counters, separate bounded admission and a five-minute project metadata cache. Summaries do not poll or benchmark; existing operator resource statistics remain separate.
 
