@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Replace the `visualize` skill and HTML template with a concise `summary` skill for local knowledge statistics, retrieval settings and configured community links. Default summaries make no remote requests or benchmark runs; existing operator statistics remain separate.
+
 ## 1.11.0 - 2026-10-26
 
 Includes the accumulated 1.10.0 development changes; 1.10.0 had no release tag.

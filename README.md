@@ -471,8 +471,13 @@ Both run the same code paths as a real search -- `explain` calls the ranker
 `query` calls, not a reimplementation of it, and a test keeps the two orders
 identical.
 
-The `visualize` skill builds a page out of the two, showing a project its own
-knowledge base and walking two of its own questions through the ranking.
+The [`summary` skill](skills/summary/SKILL.md) reports local knowledge counts,
+symbols, golden-question count, engine version, retrieval mode and configured
+community links in chat. It uses local statistics and settings; it does not poll
+community servers or run benchmarks by default. Local statistics can refresh a
+stale index. Linked communities are listed without claiming they are online or
+including their documents in the local count. Performance checks remain explicit;
+operator-only remote usage/resource statistics use the existing community actions.
 
 ## When the doc's words are not the reader's words
 
