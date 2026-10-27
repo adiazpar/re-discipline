@@ -3,13 +3,18 @@
 JSONL rows: {"q": "question", "expect": "docs/answer.md"}. An expect list
 accepts multiple independently judged answers. Never add alternatives after
 seeing the results to improve the score. Symbol rows are measured by `bench`.
-No model, network provider, corpus editing, or dependency installation is needed.
+Native binaries run from identical temporary directory layouts so plugin-package
+project refresh is not charged to only one build. This measures CLI retrieval,
+not plugin installation or first-session setup. No model, network provider,
+corpus editing, or dependency installation is needed.
 """
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import statistics
+import shutil
+import tempfile
 import subprocess
 import time
 
@@ -64,42 +69,55 @@ def main():
         if not isinstance(c["expect"], str) and not (
                 isinstance(c["expect"], list) and all(isinstance(p, str) for p in c["expect"])):
             parser.error("expect must be a path or list of paths")
-    binaries = {"baseline": args.baseline.resolve(), "candidate": args.candidate.resolve()}
-    report = {"questions_sha256": hashlib.sha256(raw).hexdigest(),
-              "sources": args.sources, "rounds": args.rounds, "binaries": {}, "cases": []}
-    for name, binary in binaries.items():
-        report["binaries"][name] = {"path": str(binary),
-            "sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
-        # Warm the index before measuring; both builds must support its format.
-        subprocess.run([str(binary), "stats", "--root", str(args.root.resolve()), "--json"],
-                       check=True, capture_output=True, timeout=120)
-    for i, case in enumerate(cases):
-        row = dict(case, baseline=[], candidate=[])
-        for round_index in range(args.rounds):
-            # Alternate order to reduce cache/order bias. No parallel queries.
-            names = list(binaries)
-            if (i + round_index) % 2:
-                names.reverse()
-            for name in names:
-                row[name].append(measure(binaries[name], args.root.resolve(), case, args.sources))
-        report["cases"].append(row)
-        if (i + 1) % 40 == 0:
-            print(f"Compared {i+1}/{len(cases)} questions", flush=True)
-    report["summary"] = {}
-    for name in binaries:
-        ranks = [r[name][0]["rank"] for r in report["cases"]]
-        times = [run["ms"] for r in report["cases"] for run in r[name]]
-        report["summary"][name] = {
-            "questions": len(cases), "top1": ranks.count(1),
-            "top5": sum(0 < r <= 5 for r in ranks), "top8": sum(0 < r <= 8 for r in ranks),
-            "mrr_at_8": statistics.mean(1 / r if r else 0 for r in ranks),
-            "p50_ms": percentile(times, .5), "p95_ms": percentile(times, .95),
-            "unstable_questions": sum(len({tuple(run["paths"]) for run in r[name]}) > 1
-                                      for r in report["cases"]),
-            "duplicate_ids": sum(run["duplicate_ids"] for r in report["cases"] for run in r[name])}
+    originals = {"baseline": args.baseline.resolve(), "candidate": args.candidate.resolve()}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps(report["summary"], indent=2))
+    # Running just one build from bin/<platform>/ inside a plugin charges its
+    # automatic project-binary hashing/refresh to only that side. Copy exact
+    # executable bytes into a shared, non-plugin layout for a fair comparison.
+    with tempfile.TemporaryDirectory(prefix="ranking-binaries-", dir=args.output.parent) as tmp:
+        binaries = {}
+        for name, original in originals.items():
+            binary = Path(tmp) / (name + original.suffix)
+            shutil.copy2(original, binary)
+            binaries[name] = binary
+        report = {"questions_sha256": hashlib.sha256(raw).hexdigest(),
+                  "sources": args.sources, "rounds": args.rounds,
+                  "launch_context": "isolated native binaries; plugin project refresh excluded equally",
+                  "binaries": {}, "cases": []}
+        for name, binary in binaries.items():
+            report["binaries"][name] = {"path": str(originals[name]),
+                "sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+            # Warm the index before measuring; both builds must support its format.
+            subprocess.run([str(binary), "stats", "--root", str(args.root.resolve()), "--json"],
+                           check=True, capture_output=True, timeout=120)
+        for i, case in enumerate(cases):
+            row = dict(case, baseline=[], candidate=[])
+            for round_index in range(args.rounds):
+                # Alternate order to reduce cache/order bias. No parallel queries.
+                names = list(binaries)
+                if (i + round_index) % 2:
+                    names.reverse()
+                for name in names:
+                    row[name].append(measure(binaries[name], args.root.resolve(), case, args.sources))
+            report["cases"].append(row)
+            if (i + 1) % 40 == 0:
+                print(f"Compared {i+1}/{len(cases)} questions", flush=True)
+        report["summary"] = {}
+        for name in binaries:
+            ranks = [r[name][0]["rank"] for r in report["cases"]]
+            times = [run["ms"] for r in report["cases"] for run in r[name]]
+            report["summary"][name] = {
+                "questions": len(cases), "top1": ranks.count(1),
+                "top5": sum(0 < r <= 5 for r in ranks), "top8": sum(0 < r <= 8 for r in ranks),
+                "mrr_at_8": statistics.mean(1 / r if r else 0 for r in ranks),
+                "p50_ms": percentile(times, .5), "p95_ms": percentile(times, .95),
+                "unstable_questions": sum(len({tuple(run["paths"]) for run in r[name]}) > 1
+                                          for r in report["cases"]),
+                "duplicate_ids": sum(run["duplicate_ids"] for r in report["cases"] for run in r[name])}
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2) + "\n")
+        print(json.dumps(report["summary"], indent=2))
+
 
 
 if __name__ == "__main__":

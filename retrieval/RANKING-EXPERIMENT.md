@@ -67,7 +67,11 @@ These include process startup and local freshness/reconciliation. Neither build
 returned warnings, duplicate finding IDs or unstable result ordering. Timing was
 not overlapped with builds, race tests or the server load run.
 
-## Server comparison
+## Initial server comparison
+
+The follow-up below identifies a setup-buffer confound in this harness. Retain
+these measurements as history; use the corrected follow-up for performance
+conclusions. Relevance and exact-result checks are unaffected.
 
 All six final runs completed. Medians of three runs per build:
 
@@ -164,7 +168,7 @@ other corpora, behavior at 10 GB, open-loop overload capacity or performance whe
 PostgreSQL shares the application's CPU/memory limit. The eight first-place and
 three top-eight regressions remain real tradeoffs.
 
-## Decision
+## Decision after the initial comparison
 
 The combination preserves the earlier aggregate relevance gains and improves
 measured local latency, server throughput and CPU cost. It passes the predeclared
@@ -172,3 +176,125 @@ CPU/throughput and data-integrity gates. It does **not** establish that every
 community's tail latency or memory demand is unaffected. Keep it as an unmerged
 experiment; investigate the tail and memory results and use genuinely new questions
 before making a broader performance or generalization claim.
+
+
+## Follow-up: allocation and latency investigation
+
+Linux CPU and heap profiles identified two avoidable costs. In the profiled
+480-workflow single-community sample, preparing unused semantic claims accounted
+for about 14% of CPU samples. Ranking's growing result slices and per-row scan
+targets allocated about 330 MiB of the approximately 873 MiB sampled allocation
+total. These are allocation volumes over the workload, not live memory sizes.
+
+The follow-up changes preserve the candidate's ranking and payloads:
+
+- Ordinary server search reads ID/fingerprint/generation in one metadata query
+  and uses the already-indexed build, digest and timestamps. Full indexed bodies
+  and semantic projections are loaded only when assistance is enabled by all
+  three gates: configured provider, community policy and request. Explicit full
+  document reads and authorization checks are unchanged.
+- Reuse the candidate scan target, copying each complete value into the result
+  slice. Small lookups remain small; after 16 candidates reserve the bounded
+  window once. The reservation is capped at 1,024 entries for unusually large
+  internal pages, without capping the returned candidates. There is no cache,
+  global retained buffer, extra SQL pass or scoring change.
+
+Instrumentation also uncovered a **test-fixture confound**: serializing all four
+corpora into the private generator's setup file left an 80 MiB buffer in
+`encoding/json`'s pool. Its retention varied between runs and with allocation
+rate; it raised the GC target and distorted both memory and timing comparisons.
+The heap profile attributes the buffer to fixture setup, not a production search
+response. The partially completed first follow-up comparison was stopped and
+retained as diagnostic evidence. Its performance numbers are not used below.
+
+The corrected fixture releases both generations of that pool before making the
+setup file visible to the generator, and checks that live setup heap is below
+16 MiB. This happens identically on both builds, only in the private test harness;
+no forced-GC policy was added to the product. The new run records Go allocation
+and GC counters, process RSS, cgroup anonymous/file memory, and each load request's
+HTTP status and queue-time header. Profiling is disabled for timed comparisons.
+Six fresh runs retain the same 2 CPU/512 MiB budget, corpus, four communities,
+1,000 credentials and four 480-workflow scenarios. Pair order is main/fixed,
+fixed/main, main/fixed, with a different preselected request-shuffle seed per pair.
+
+The corrected comparison completed with all six runs. Each scenario began with
+at most 2.02 MiB of live Go heap. Medians of three runs per build:
+
+| Workload | Workflows/s main → fixed | CPU change | p95 main → fixed | p99 change |
+| --- | ---: | ---: | ---: | ---: |
+| One community | 27.84 → 32.15 | -23.8% | 1436 → 1251 ms | -10.1% |
+| Four, even traffic | 29.12 → 33.44 | -24.6% | 2253 → 1900 ms | -16.0% |
+| Four, 80/10/5/5 traffic | 28.67 → 32.49 | -23.8% | 1600 → 1431 ms | -1.2% |
+| Uneven traffic plus uploads | 28.04 → 29.93 | -18.2% | 1707 → 1568 ms | -3.1% |
+
+Every community's median p95 improved in the corrected comparison. For even
+traffic the four changes were -9.1%, -16.0%, -31.6% and -12.8%; the earlier +20.7%
+median regression did not recur. Uneven traffic improved by 2.5–11.2%, and mixed
+upload traffic by 9.6–25.8%. Individual runs still varied: for example, the third
+pair's overall uneven-traffic p95 was 2.5% slower despite higher throughput. These
+are three-run medians, not a guarantee that every request or run is faster.
+
+Go allocation volume fell 58.6–58.9% for read workloads and 45.1% with uploads.
+**Allocation volume is not peak memory.** Median process RSS peaks changed from
+68.0 → 68.5 MiB (single), 65.7 → 69.2 MiB (even), 65.0 → 68.3 MiB (uneven), and
+68.2 → 71.1 MiB (mixed). That residual 0.5–3.5 MiB increase remains a tradeoff; no
+GC tuning was added to hide it. Median total cgroup peaks were 241.7 → 242.3,
+166.2 → 164.6, 166.5 → 167.8 and 182.8 → 174.5 MiB respectively: read totals were
+within 1%, and mixed-upload total memory decreased 4.5%. The much larger earlier
+memory difference cannot be treated as evidence of a production regression,
+because setup-buffer retention was not controlled in those runs.
+
+Across the corrected runs, **11,520 workflows / 23,040 measured HTTP attempts**
+completed with zero failures, non-200 responses, retries, duplicate IDs,
+wrong-community results, fingerprint mismatches or incorrect full documents.
+There were no scheduler rejections, expirations or cancellations. All 2,400
+documents uploaded successfully, indexes caught up and new content was searchable;
+final index catch-up took at most 3.34 ms (1.72 ms on the candidate).
+This catches hidden safe-read retries as well as final workflow failures.
+
+Ranking remains unchanged by these follow-up fixes. All 768 local ordered-payload
+hashes match the previous candidate. The server's full 96-query/four-community
+payload oracle also matches. The 258-question server quality set remains 207
+first / 256 top-eight for the candidate versus 189 / 254 on main. The existing
+eight first-place and three top-eight local regressions are **not** repaired by
+these performance changes, and the question sets are still previously used.
+
+The new PostgreSQL integration tests check indexed metadata before and after a
+stored replacement becomes searchable, missing-record failure, all assistance
+gates, full claim projection through a mocked provider, and unchanged result
+identity through assistance. Both Go race suites and vet passed; all seven
+canonical artifacts rebuilt and passed reproducibility checks. Native CLI,
+Claude/Codex MCP adapters and both session hooks passed the smoke fixture.
+No paid or external semantic-provider request was made.
+
+Two alternating native CLI rounds on the same 336 questions confirm 274 first /
+332 top-eight, versus main's 245 / 329, with no duplicates or unstable ordering.
+Median latency was 88.918 → 82.349 ms (-7.4%); p95 was 106.493 → 99.776 ms (-6.3%).
+These runs used matching standalone executable layouts. An earlier check had
+mistakenly launched only the candidate inside the plugin package, charging its
+per-process project-binary hashing/refresh to that side alone; that unmatched
+measurement is retained separately and is not a retrieval comparison. The refresh
+code is unchanged from main. `evaluate-ranking.py` now copies both native binaries
+into a temporary matching layout automatically, records their original paths and
+hashes, and removes the copies afterward. These CLI timings exclude plugin refresh
+for both builds; the adapter smoke tests separately exercise that behavior.
+
+The final cleanup audit confirmed all 12,633 real corpus Markdown files unchanged,
+both installed plugins and the real project's binary still matching main, and the
+original community healthy on its original build. Disposable databases, containers,
+image tags, retained experiment images, client network and reader-key files were
+removed. Test results and private profiles stay in the centralized report directory.
+
+## Current assessment
+
+The two targeted fixes remove measured unnecessary work and retain the ranking
+gains. In this controlled corpus/load comparison, CPU, throughput and median
+per-community tails improve together. Peak process memory is slightly higher,
+and individual tail samples still fluctuate. The large memory result from the
+original harness was confounded by its setup buffer. The original generalization,
+corpus-size and shared-PostgreSQL resource limitations still apply.
+
+Keep this branch unmerged and unpushed. The follow-up does not change installed
+plugins, the real project or its live community. Private profiles, source hashes,
+corrected and aborted run records, payload oracles and cleanup checks remain in
+the centralized local experiment directory; no corpus or credentials enter Git.

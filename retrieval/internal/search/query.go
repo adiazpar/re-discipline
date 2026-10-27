@@ -247,9 +247,12 @@ func rankCandidates(ctx context.Context, tx *sql.Tx, q, match string, opts Query
 	}
 	var all []ScoredHit
 	features := newFieldQuery(q)
+	// Scan into a reusable value: appending copies it, and database/sql owns
+	// the scanned strings. A new scan target per row otherwise escapes to the
+	// heap even though no caller needs its address.
+	var s ScoredHit
+	var declared, indexedIdents string
 	for rows.Next() {
-		var s ScoredHit
-		var declared, indexedIdents string
 		if err := rows.Scan(&s.rowID, &s.Title, &s.Status, &s.Kind, &declared, &indexedIdents, &s.Raw, &s.ExactIdentifier); err != nil {
 			return nil, err
 		}
@@ -257,6 +260,14 @@ func rankCandidates(ctx context.Context, tx *sql.Tx, q, match string, opts Query
 		s.Declares = declaredIdentMatch(declared, queryTerms)
 		s.Superseded = s.Status == "superseded"
 		s.Coverage, s.OrderedPairs = features.match(s.Title, indexedIdents)
+		if len(all) == 16 {
+			// Small exact lookups stay small. Broader queries reserve their
+			// bounded candidate window once, avoiding repeated large copies.
+			// Cap only the reservation, not results, for large internal pages.
+			reserved := make([]ScoredHit, len(all), min(fetch, 1024))
+			copy(reserved, all)
+			all = reserved
+		}
 		all = append(all, s)
 	}
 	if err := rows.Err(); err != nil {

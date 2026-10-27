@@ -134,7 +134,7 @@ including locations, instead of silently relabeling evidence.
 
 ## Retrieval optimizations and visibility
 
-The shared FTS5/BM25 ranking remains unchanged. Each community has one derived
+Local and server searches use the same FTS5/BM25 ranking. Each community has one derived
 SQLite index with exact Markdown and fingerprint beside its search entries.
 A community lock spans search and hydration so results cannot combine text from
 one update with the fingerprint of another. Indexing applies bounded 32-document
@@ -142,6 +142,15 @@ transactions and rotates between communities; it never rebuilds the whole KB for
 each upload. Queries return the available index without lag warnings. A cold or
 deleted-content index returns a temporary unavailable response until ready.
 Corrupt/obsolete index schemas are rebuilt from PostgreSQL by the worker.
+
+Ordinary searches read indexed metadata and generate snippets only for the final
+page. They do not load and parse complete Markdown documents or prepare unused
+semantic claims. Optional assistance loads the matching indexed bodies only when
+the server provider, community policy and request all allow it. This retains the
+same identity, timestamps, text digest and generation as the search snapshot;
+explicit `knowledge.get` calls still return current stored documents. The local
+ranking experiment and measured limitations are recorded in
+[the experiment report](../../retrieval/RANKING-EXPERIMENT.md).
 
 Owner uploads use a separate fair queue with CPU/RAM-sized workers and a bounded
 pending byte budget. Batches cap both document count and encoded bytes; the worker
