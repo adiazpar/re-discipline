@@ -142,7 +142,11 @@ def main():
                 print('Checking real rollback after an unhealthy replacement...',flush=True)
                 bad=base/'bad';bad_binary=bad/'bin/server'/('linux-'+arch)/'community';bad_binary.parent.mkdir(parents=True)
                 (bad/'server').mkdir();shutil.copy2(REPO/'server/Dockerfile',bad/'server/Dockerfile')
-                bad_target={**target,'version':'1.12.0','build':'f'*64}
+                # Always offer a newer compatible version. A fixed version can
+                # equal the real release and correctly skip deployment, which
+                # would never exercise the unhealthy-image rollback path.
+                major,minor,patch=map(int,target['version'].split('.'))
+                bad_target={**target,'version':f'{major}.{minor}.{patch+1}','build':'f'*64}
                 (bad/'bin/build.json').write_text(json.dumps(bad_target))
                 program=base/'bad.go';program.write_text('package main; import("os";"fmt");func main(){if len(os.Args)>1 && os.Args[1]=="version"{fmt.Print('+json.dumps(json.dumps(bad_target))+');return};os.Exit(42)}')
                 run(['go','build','-o',bad_binary,program],env=dict(os.environ,GOOS='linux',GOARCH=arch,CGO_ENABLED='0'))
