@@ -467,9 +467,9 @@ coverage and ordered-word boost, exact-name priority and resulting rank. An exac
 that declares that identifier; broader questions retain relevance ranking.
 `re-search stats` prints the matching census and ranking rules in force.
 
-This branch combines experimental ranking signals with deferred snippet loading.
+Version 1.12.1 combines these ranking signals with deferred snippet loading.
 See [the ranking experiment](retrieval/RANKING-EXPERIMENT.md) for its comparison
-against main, known regressions and load-test limits. It is not a release.
+against the 1.12.0 baseline, known regressions and load-test limits.
 
 Both run the same code paths as a real search -- `explain` calls the ranker
 `query` calls, not a reimplementation of it, and a test keeps the two orders

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.1 - 2026-10-26
+
+- Improve lexical ranking with title/identifier coverage, ordered-word matches and a query-scaled reference penalty while preserving exact-name priority and superseded-last ordering. The recorded corpus comparison improves first-place results from 245/336 to 274/336, with eight first-place regressions; it does not guarantee accuracy for unseen questions.
+- Load result bodies and metadata only after ranking, within one SQLite read snapshot. Batch server copy-state lookups and avoid preparing full documents for disabled query assistance. Controlled load tests improve throughput and CPU cost while preserving community isolation, fingerprints and duplicate reconciliation.
+- Normalize native benchmark launch layouts so plugin refresh overhead does not bias engine comparisons. Record corrected load-test controls and remaining memory/generalization limits in the ranking experiment report.
+
 ## 1.12.0 - 2026-10-26
 
 - Replace the `visualize` skill and HTML template with a concise `summary` skill for local knowledge statistics, retrieval settings and linked community counts. Add scoped `community.stats` with stored counters, separate bounded admission and a five-minute project metadata cache. Summaries do not poll or benchmark; existing operator resource statistics remain separate.

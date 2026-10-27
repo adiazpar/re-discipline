@@ -1,9 +1,11 @@
 # Combined ranking and query performance experiment
 
-Local branch: `codex/ranking-performance-combined`. Not merged, pushed or released.
+Implementation accepted for main as version 1.12.1 on 2026-10-26, following the
+corrected follow-up below. Experiment branch: `codex/ranking-performance-combined`.
 Baseline: main at `3f7d23df7af8747a774da7a879ca237be3d22ce3` (1.12.0).
-The installed plugins, the real project and its existing community remain on main.
-The version number is unchanged; branch binaries are experimental artifacts.
+During testing, the installed plugins, real project and existing community stayed
+on the baseline; experimental binaries retained version 1.12.0. The accepted
+implementation uses 1.12.1 so managed installations can recognize the upgrade.
 
 ## Change being tested
 
@@ -173,9 +175,10 @@ three top-eight regressions remain real tradeoffs.
 The combination preserves the earlier aggregate relevance gains and improves
 measured local latency, server throughput and CPU cost. It passes the predeclared
 CPU/throughput and data-integrity gates. It does **not** establish that every
-community's tail latency or memory demand is unaffected. Keep it as an unmerged
-experiment; investigate the tail and memory results and use genuinely new questions
-before making a broader performance or generalization claim.
+community's tail latency or memory demand is unaffected. The initial decision was
+to keep it unmerged and investigate the tail and memory results. The follow-up
+below resolves those investigations; genuinely new questions are still needed
+before making a broader generalization claim.
 
 
 ## Follow-up: allocation and latency investigation
@@ -294,7 +297,7 @@ and individual tail samples still fluctuate. The large memory result from the
 original harness was confounded by its setup buffer. The original generalization,
 corpus-size and shared-PostgreSQL resource limitations still apply.
 
-Keep this branch unmerged and unpushed. The follow-up does not change installed
-plugins, the real project or its live community. Private profiles, source hashes,
+The owner accepted this implementation for main after reviewing the follow-up.
+Deployment follows the versioned plugin and managed server update paths. Private profiles, source hashes,
 corrected and aborted run records, payload oracles and cleanup checks remain in
 the centralized local experiment directory; no corpus or credentials enter Git.
