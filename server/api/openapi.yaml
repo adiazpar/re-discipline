@@ -23,10 +23,14 @@ paths:
         selected public community, or consumes a single-use private invitation.
         Reader requests use Ed25519 HTTP Message Signatures; only the operator
         uses a bearer credential. Readers may call
-        community.get, query, knowledge.get
+        community.get, community.stats, query, knowledge.get
         with the exact connected community UUID. Only the operator may create,
         update, delete, upload, replace or remove knowledge, list hosted communities or call
-        access.create/list/revoke or server.stats. Read operations share fair bounded queues. See skills/community/references/operations.md
+        access.create/list/revoke or server.stats. Searches and document reads share fair bounded queues.
+        community.stats accepts no data and returns community_id, documents,
+        knowledge_bytes and observed_at from stored counters, without scanning
+        knowledge or invoking retrieval. Metadata has separate bounded admission;
+        overload returns 503 with Retry-After. See skills/community/references/operations.md
         for operation payloads. Internal knowledge.inventory pages hashes; knowledge.put
         accepts owner-only bounded batches of current documents. Same ID with changed
         fingerprint replaces current content automatically; accepted retries replay

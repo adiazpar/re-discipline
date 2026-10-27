@@ -31,6 +31,7 @@ func TestOnlyOperatorManagementTriggersDeploymentCheck(t *testing.T) {
 		{"knowledge.upload", "operator", nil, 1},
 		{"query", "operator", key, 0},
 		{"knowledge.get", "operator", key, 0},
+		{"community.stats", "operator", key, 0},
 		{"community.connect", "operator", key, 0},
 		{"community.leave", "operator", key, 0},
 		{"knowledge.upload", "", key, 0},

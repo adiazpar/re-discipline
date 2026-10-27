@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Replace the `visualize` skill and HTML template with a concise `summary` skill for local knowledge statistics, retrieval settings and configured community links. Default summaries make no remote requests or benchmark runs; existing operator statistics remain separate.
+- Replace the `visualize` skill and HTML template with a concise `summary` skill for local knowledge statistics, retrieval settings and linked community counts. Add scoped `community.stats` with stored counters, separate bounded admission and a five-minute project metadata cache. Summaries do not poll or benchmark; existing operator resource statistics remain separate.
 
 ## 1.11.0 - 2026-10-26
 

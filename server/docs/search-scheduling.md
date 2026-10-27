@@ -6,7 +6,7 @@ retrieval engine on the server and returns snippets, finding IDs and fingerprint
 provenance (default eight hits, maximum fifty). `knowledge.get` reads the selected
 full finding from PostgreSQL. Normal research is search, inspect a few sources,
 then ask a narrower question if needed. No corpus synchronization is involved.
-All community reader operations, including document reads, enter the
+Searches, community descriptions and full-document reads enter the
 same scheduler. Searches and full-document reads therefore compete fairly instead
 of letting follow-up fetches bypass resource controls.
 
@@ -57,6 +57,29 @@ apply to the production search handler.
 
 Budgets are resolved at startup: restart after resizing the container. Optional
 settings are listed in `.env.example`. There is no fixed per-community active cap.
+
+## Optional summary counts
+
+`community.stats` returns only the connected community's UUID, stored document
+count, knowledge-text bytes and observation time. It reads counters alongside
+the existing authorization row, without scanning documents or opening SQLite.
+Each request still verifies its signature, scope and lifecycle, and records its
+replay nonce. It does not expose members, keys, other communities or server load.
+
+Metadata uses a separate pool: at least one worker, otherwise the minimum of
+CPU parallelism / 4, database connections / 8 and four. Up to eight waiters per
+worker wait at most 100 ms; execution has a one-second deadline. Metadata waiters
+release normal ingress capacity. Overload returns 503 with Retry-After: 5.
+Search execution slots are never consumed by metadata. Authentication, network
+and database resources remain shared, so this is bounded overhead rather than
+absolute performance isolation.
+
+The client coalesces concurrent summary requests with a project file lock and
+caches counts for five minutes, keyed by project, origin, community and public
+key scope. It never caches documents or secrets. A cached observation does not
+prove current access, availability or index freshness. Expired snapshots are not
+served on errors. Disconnect removes its entry; later refreshes prune expired
+entries. The summary skill requests each link once and omits unavailable counts.
 
 ## Sharing across communities
 
@@ -116,7 +139,7 @@ SQLite index with exact Markdown and fingerprint beside its search entries.
 A community lock spans search and hydration so results cannot combine text from
 one update with the fingerprint of another. Indexing applies bounded 32-document
 transactions and rotates between communities; it never rebuilds the whole KB for
-each upload. Queries report when stored knowledge is ahead of the index. A cold or
+each upload. Queries return the available index without lag warnings. A cold or
 deleted-content index returns a temporary unavailable response until ready.
 Corrupt/obsolete index schemas are rebuilt from PostgreSQL by the worker.
 

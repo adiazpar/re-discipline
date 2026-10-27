@@ -55,6 +55,8 @@ type Server struct {
 	requestSlots    chan struct{}
 	ingressWaiters  chan struct{}
 	operatorSlots   chan struct{}
+	statsSlots      chan struct{}
+	statsWaiters    chan struct{}
 }
 type rateWindow struct {
 	Start time.Time
@@ -85,6 +87,9 @@ func New(db *pgxpool.Pool, c Config) *Server {
 	s.requestSlots = make(chan struct{}, s.budget.Ingress)
 	s.ingressWaiters = make(chan struct{}, s.budget.Queue)
 	s.operatorSlots = make(chan struct{}, 4)
+	metadataWorkers := max(1, min(s.budget.CPUs/4, s.budget.DBConnections/8, 4))
+	s.statsSlots = make(chan struct{}, metadataWorkers)
+	s.statsWaiters = make(chan struct{}, metadataWorkers*8)
 	if c.JevEnabled && !c.SetupOnly && !c.LocalOnly {
 		s.Semantic = semantic.New(semantic.Config{Enabled: true, DailyRequests: setting("MAX_DAILY_JEV_REQUESTS", 200)}, filepath.Join(c.CacheDir, "semantic"))
 		s.Semantic.Reserve = func(ctx context.Context) error {

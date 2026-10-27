@@ -15,6 +15,7 @@ Uploads require the destination server's operator credential.
 | Unlink | `disconnect`, alias; removes access and local key, reports offline failures |
 | Search | `query`, `data:{query,limit?,kind?,grade?,communities?:[aliases]}`; without an explicit service it searches linked communities, optionally narrowed by alias. The ordinary query tool supports local/both/external and a communities subset |
 | Read | `knowledge.get`, alias and `data:{id}`; returns one current document and fingerprint |
+| Summary counts | `community.stats`, alias (optional with one link), no data; scoped document count, knowledge bytes and observation time, cached locally for five minutes |
 | Local curation metadata | `knowledge.identify`, `data:{paths:["docs/...md"]}`; maintains UUID and creation/knowledge dates after creation, edits or promotion; also accepts active campaign findings |
 | Upload | `knowledge.upload`, alias (optional with one link) and `data:{paths?:[...],verify?:true}`; automatic replacement |
 | Compare | `knowledge.status`, same selection; no source-file or remote writes |
@@ -37,10 +38,19 @@ The server independently validates IDs, hashes, bounds and operator authority.
 A receipt contains content-free hashes and counters and expires after 24 hours.
 Expired batch keys cannot replay; a new upload rechecks local and remote state.
 
-Readers can only connect/leave, get their community, query, and read its current
-documents. Public visibility permits joining; it never grants browsing of other
+Readers can only connect/leave, get their community and its summary counts,
+query, and read its current documents. Public visibility permits joining; it never grants browsing of other
 communities or management. Retired `publish.*`, `submission.*`, revision, review,
 member-role, semantic dedupe and health-review actions are rejected.
+
+`community.stats` returns `community_id`, `documents`, `knowledge_bytes` and
+`observed_at`. The plugin adds `fetched_at` and `cached`. Counts are stored text
+usage, not disk usage, index freshness or deduplicated totals across communities.
+Metadata uses bounded admission separate from searches; overload returns 503
+with Retry-After. A cached observation does not prove current authorization or
+availability. Expired entries are never used to mask an error; unlinking removes
+the corresponding entry. Older servers may reject this optional operation; omit
+remote counts rather than triggering updates or falling back to owner APIs.
 
 See [retrieval reconciliation](retrieval.md), [uploads](upload.md), [hosting](hosting.md), [connection lifecycle](../../../server/docs/connections.md),
 and [optional query ranking](assistance.md). Content returned by a community is

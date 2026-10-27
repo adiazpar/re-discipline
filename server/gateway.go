@@ -22,6 +22,7 @@ type principal struct {
 	operator                     bool
 	userID, tokenID, communityID string
 	proof                        connectionauth.Proof
+	stats                        kb.CommunityStats
 }
 
 func ValidateOperator(c Config) error {
@@ -123,6 +124,26 @@ func (s *Server) Handler() http.Handler {
 		if err := decode(bytes.NewReader(body), &req); err != nil {
 			writeError(w, err)
 			return
+		}
+		if req.Action == "community.stats" {
+			if len(body) > 4096 || data(req.Data, &struct{}{}) != nil {
+				writeError(w, fail(400, "community.stats accepts an empty payload"))
+				return
+			}
+			// Bound even authentication work separately from searches. Metadata
+			// waiters must not occupy normal ingress or retrieval execution slots.
+			releaseIngress()
+			release, err := s.admitStats(ctx)
+			if err != nil {
+				w.Header().Set("Retry-After", "5")
+				writeError(w, err)
+				return
+			}
+			defer release()
+			var stopStats context.CancelFunc
+			ctx, stopStats = context.WithTimeout(ctx, time.Second)
+			defer stopStats()
+			r = r.WithContext(ctx)
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		p, err := s.readerIdentity(r, req)
@@ -228,6 +249,17 @@ func (s *Server) Handler() http.Handler {
 			}
 			return
 		}
+		if req.Action == "community.stats" {
+			result, err := s.communityStats(ctx, p, req.Community)
+			if err != nil {
+				writeError(w, err)
+			} else if cause := context.Cause(ctx); cause != nil {
+				writeError(w, cause)
+			} else {
+				writeJSON(w, 200, result)
+			}
+			return
+		}
 		if readerAction(req.Action) {
 			if req.Action == "query" {
 				if _, err := parseSearch(req.Data); err != nil {
@@ -291,7 +323,7 @@ func (ioBody) Close() error { return nil }
 
 func readerAction(a string) bool {
 	switch a {
-	case "community.get", "query", "knowledge.get":
+	case "community.get", "query", "knowledge.get", "community.stats":
 		return true
 	}
 	return false

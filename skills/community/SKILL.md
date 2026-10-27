@@ -95,6 +95,10 @@ or suggest synchronization. Old sync settings are interpreted as remote. During
 an outage, report the unavailable community and retain successful results from other communities and the local project. Do not silently fall back to old community content.
 
 Operators can inspect the shared resource budget and queue through `server.stats`.
+Readers can request only their own community's document/byte counts through
+`community.stats`; the [summary skill](../summary/SKILL.md) uses a five-minute
+metadata cache and skips unavailable counts. Statistics have separate bounded
+admission and never invoke retrieval.
 Authenticated reads use available capacity without a fixed minute quota. The
 server shares work between communities and their reader connections. The client
 automatically retries busy reads and interrupted read connections at most twice,

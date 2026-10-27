@@ -90,9 +90,12 @@ five client engines and both Linux service engines with a shared identity.
 verifies a server artifact. Docker's test stage still builds instrumented tests;
 the deployed image uses the canonical prebuilt service.
 
-A change to the wire contract must change the protocol, and a change to persisted
-knowledge must include a migration. A different source digest alone does not
-prove that two releases are compatible.
+An incompatible change to the wire contract must change the protocol, and a
+change to persisted knowledge must include a migration. Additive optional
+operations such as `community.stats` preserve the protocol only when existing
+operations retain their meaning and newer clients tolerate an unsupported
+operation on older servers. A different source digest alone does not prove that
+two releases are compatible.
 
 Policy tests cover eligibility, staging failure, rollback, interruption recovery,
 locking and SSH transport boundaries. Native smoke tests exercise project refresh

@@ -36,7 +36,15 @@ func (s *Server) readerIdentity(r *http.Request, req kb.Request) (principal, err
 	}
 	p.proof = proof
 	var revoked, expired, visible, frozen bool
-	err = s.DB.QueryRow(r.Context(), `SELECT c.id::text,c.community_id::text,c.revoked_at IS NOT NULL,c.expires_at<=now(),(NOT c.public_connection OR l.visibility='public'),l.deletion_id IS NOT NULL FROM community.reader_connections c JOIN community.libraries l ON l.id=c.community_id WHERE c.public_key=$1`, proof.PublicKey).Scan(&p.tokenID, &p.communityID, &revoked, &expired, &visible, &frozen)
+	columns := `c.id::text,c.community_id::text,c.revoked_at IS NOT NULL,c.expires_at<=now(),(NOT c.public_connection OR l.visibility='public'),l.deletion_id IS NOT NULL`
+	values := []any{&p.tokenID, &p.communityID, &revoked, &expired, &visible, &frozen}
+	if req.Action == "community.stats" {
+		// Counters come from the same row/snapshot already used to authorize
+		// this key. Statistics never scan knowledge or open a search index.
+		columns += `,l.knowledge_count,l.knowledge_bytes`
+		values = append(values, &p.stats.Documents, &p.stats.KnowledgeBytes)
+	}
+	err = s.DB.QueryRow(r.Context(), `SELECT `+columns+` FROM community.reader_connections c JOIN community.libraries l ON l.id=c.community_id WHERE c.public_key=$1`, proof.PublicKey).Scan(values...)
 	if err == pgx.ErrNoRows {
 		return p, nil
 	}

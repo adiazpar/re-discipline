@@ -352,5 +352,6 @@ func disconnect(ctx context.Context, root, alias string, deleted *Connection) (a
 	if err = atomicJSON(SettingsPath(root), settings); err != nil {
 		return nil, err
 	}
+	_ = os.Remove(statsCachePath(root, target))
 	return result, nil
 }

@@ -13,8 +13,13 @@ knowledge or alter its behavior; HTTPS and public keys do not protect against th
 operator's machine being fully compromised. Revoked keys retain bounded denial
 records. See [connection lifecycle](connections.md) for expiry and renewal.
 
-The API allowlist and PostgreSQL RLS both enforce read scope and deny reader
-writes. Queued readers are reauthorized on admission. Operator ingress remains
+The API allowlist and PostgreSQL RLS enforce knowledge read scope and deny reader
+writes. Summary counters come from the same key-scoped community row used for
+authentication; statistics admission precedes that authorization check. No
+member details, credentials or other communities are exposed. A five-minute
+client metadata cache retains only counts and timestamps already delivered;
+revocation cannot recall those past observations. Queued search/document readers
+are reauthorized on admission. Operator ingress remains
 available separately for revocation and management. Migration credentials are
 separate from the restricted runtime login. Owner credentials are never placed
 in project files, knowledge archives, Git or reader installations.

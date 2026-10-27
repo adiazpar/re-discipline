@@ -473,11 +473,13 @@ identical.
 
 The [`summary` skill](skills/summary/SKILL.md) reports local knowledge counts,
 symbols, golden-question count, engine version, retrieval mode and configured
-community links in chat. It uses local statistics and settings; it does not poll
-community servers or run benchmarks by default. Local statistics can refresh a
-stale index. Linked communities are listed without claiming they are online or
-including their documents in the local count. Performance checks remain explicit;
-operator-only remote usage/resource statistics use the existing community actions.
+community links in chat. For each link it requests small, scoped document/byte
+counts through `community.stats`, reusing a five-minute local metadata cache.
+Observation times distinguish cached counts; busy, offline or older servers
+simply have unavailable counts. It does not poll or run benchmarks. Local
+statistics can refresh a stale index. Local and remote counts remain separate
+because the same knowledge may exist in several places. Performance checks
+remain explicit; server resource metrics are operator-only.
 
 ## When the doc's words are not the reader's words
 

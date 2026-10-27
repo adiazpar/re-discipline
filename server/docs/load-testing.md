@@ -1,5 +1,75 @@
 # Load testing
 
+## Summary endpoint alongside retrieval
+
+After building the plugin, run:
+
+```sh
+python3 scripts/community-stats-load.py --seconds 20 --rounds 3 --summary-smoke --report /absolute/path/summary-load.json
+```
+
+This uses the local installation's PostgreSQL service and creates a separate,
+disposable database and Linux app container (two CPUs, 512 MiB, Go target 384 MiB).
+PostgreSQL runs separately; the app limit is not a total database-plus-app memory
+budget. The native load generator runs outside the container. The fixture uses
+the production database role/pool size, indexing worker, connection/nonce cleanup
+and deletion cleanup. It removes its container, database, temporary reader keys
+and projects afterward. Only the aggregate reports remain.
+
+Four communities (two public, two private) have 1,000 signed reader connections
+and 512 synthetic documents each. Thirty-two queried UUIDs deliberately have
+different contents in each community. Every workflow checks ranked UUID, scope,
+fingerprint, all 32 comparison entries and exact full-document Markdown. This
+tests retrieval integrity under contention, not semantic accuracy on arbitrary
+questions or performance on a 10 GB corpus.
+
+Each round compares 20 workflows/second with and without four statistics requests
+per second, then 64 concurrent workflows with zero, four, or approximately 1,000
+statistics requests per second. A final flood targets one community while all
+four keep searching. Alternate rounds reverse phase order. The flood deliberately
+bypasses the client cache to test server admission. Four refreshes/second models
+1,200 independently spaced links refreshing once every five minutes. Real summary
+calls reuse the cache and are not scheduled background polling.
+
+Incorrect results, failed retrievals or unexpected metadata errors fail the test;
+bounded 503 responses to metadata overload are counted separately. Reports include
+aggregate and per-community latency, throughput, offered-load drops and server
+resource observations. Compare repeated phases rather than treating one faster
+sample as an optimization. Network/authentication work is shared, so zero impact
+under every possible workload is not a valid guarantee. The optional smoke check
+executes the summary skill's local stats, link listing and cached metadata calls
+through both shipped MCP adapters, using actual OS-stored reader keys.
+
+Measured on Apple M2/OrbStack, 2026-10-26, using the configuration above (median
+of three 20-second phases; one workflow is search plus full-document retrieval):
+
+| Traffic | Workflows/s | Workflow p95 |
+| --- | ---: | ---: |
+| Normal, no summaries | 19.98 | 26.17 ms |
+| Normal + 4 statistics requests/s | 19.97 | 25.70 ms |
+| 64 concurrent workflows, no summaries | 125.70 | 1,417.79 ms |
+| 64 concurrent + 4 statistics requests/s | 126.04 | 1,245.57 ms |
+| 64 concurrent + ~1,000 statistics requests/s, all communities | 121.07 | 1,469.78 ms |
+| 64 concurrent + ~1,000 statistics requests/s, one community | 120.24 | 1,334.68 ms |
+
+All **32,007 workflows** passed exact content and scope checks, including
+1,024,224 comparison entries. There were 25,948 successful metadata responses,
+93,864 bounded busy responses during floods, zero unexpected metadata errors,
+zero generator admission drops and zero search scheduler rejections/expirations.
+All 480 ordinary metadata requests succeeded. Server-container peak memory was
+57.41 MiB, including fixture setup; PostgreSQL memory is outside that number.
+Both adapter summary workflows and persistent cache/disconnect checks passed.
+
+Normal summary traffic showed no meaningful aggregate regression. Floods reduced
+median throughput by 3.7–4.3%; they are bounded, not free. Per-community p95s varied
+substantially between phases, including without flood traffic, so these samples
+do not establish unchanged individual tail latency. Faster samples are timing
+variation, not evidence that summaries improve retrieval. These measurements
+support best-effort optional counts, not a zero-overhead or production-capacity
+guarantee.
+
+## Concurrent uploads and retrieval
+
 Run `python3 scripts/community-load.py --context orbstack` after local installation.
 The helper builds the current test binary and runs against its own disposable
 PostgreSQL database. It never changes the development corpus. Default resources:
