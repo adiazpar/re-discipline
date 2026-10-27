@@ -214,7 +214,7 @@ func TestQueryDeclaredIdents(t *testing.T) {
 // Reference docs are bulk-generated and outnumber curated facts; on a
 // concept query that names no declared identifier, a matching fact doc
 // must outrank them even when the reference doc's term overlap is
-// comparable (referencePenalty).
+// comparable (the query-scaled reference penalty).
 func TestQueryReferencePenalizedOnConceptQuery(t *testing.T) {
 	root := buildTestCorpus(t)
 	hits, _, err := Query(root, "why does the demon stand idle instead of attacking", 5)
@@ -237,7 +237,7 @@ func TestQueryReferencePenalizedOnConceptQuery(t *testing.T) {
 }
 
 // A query naming a declared identifier is exactly what reference docs
-// exist for: the declaring doc is exempt from referencePenalty and must
+// exist for: the declaring doc is exempt from the reference penalty and must
 // rank first, in both the verbatim and the collapsed spelling.
 func TestQueryReferenceIdentLookupExempt(t *testing.T) {
 	root := buildTestCorpus(t)

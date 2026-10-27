@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"sort"
@@ -49,25 +50,13 @@ type QueryOptions struct {
 // by sweeping combinations against golden.jsonl; identifier-bearing
 // titles and the idents column must outrank incidental body mentions.
 const (
-	weightTitle  = 4.0
+	weightTitle  = 2.0
 	weightBody   = 1.0
-	weightIdents = 2.0
+	weightIdents = 4.0
 )
 
-// referencePenalty is added to the bm25 score (negative = better, so
-// adding worsens) of kind:reference rows whose DECLARED identifiers
-// match no query term. Bulk-generated reference docs outnumber curated
-// fact docs by an order of magnitude and would otherwise displace them
-// on natural-language concept queries; a lookup that names a declared
-// identifier ("what does spawnSingleAI do") is exempt, so identifier
-// lookups reach their reference doc regardless of this value. Chosen by
-// sweeping 0.25–50 against golden.jsonl's fact and reference halves
-// separately: 7–15 maximizes both (fact 99/106, reference 41/42); 10 is
-// the midpoint of the plateau.
-const referencePenalty = 10.0
-
 // rerankFetchMin is how many candidate rows QueryOpts fetches before
-// applying referencePenalty in Go: enough that demoting reference rows
+// applying field coverage and reference preference in Go: enough that demoting reference rows
 // cannot starve the final page of the fact rows ranked just below them.
 const rerankFetchMin = 100
 
@@ -95,7 +84,7 @@ func QuerySnapshotContext(ctx context.Context, root, q string, opts QueryOptions
 	if _, err := os.Stat(IndexPath(root)); err != nil {
 		return nil, nil, err
 	}
-	ranked, _, warnings, err := rankIndexContext(ctx, root, q, opts, false)
+	ranked, _, warnings, err := rankIndexContext(ctx, root, q, opts, false, false)
 	if err != nil {
 		return nil, warnings, err
 	}
@@ -111,7 +100,7 @@ func QuerySnapshotContext(ctx context.Context, root, q string, opts QueryOptions
 }
 
 func queryIndex(root, q string, opts QueryOptions, refresh bool) ([]Hit, []string, error) {
-	ranked, _, warnings, err := rankIndex(root, q, opts, refresh)
+	ranked, _, warnings, err := rankIndexContext(context.Background(), root, q, opts, refresh, false)
 	if err != nil {
 		return nil, warnings, err
 	}
@@ -129,15 +118,16 @@ func queryIndex(root, q string, opts QueryOptions, refresh bool) ([]Hit, []strin
 	return hits, warnings, nil
 }
 
-// ScoredHit is one candidate with the ranking arithmetic left visible:
-// what bm25 said, what the reference penalty added, and what the two
-// came to. Explain reports these so a surprising result can be read
-// rather than guessed at.
+// ScoredHit exposes the arithmetic shared by query and immutable snapshots.
 type ScoredHit struct {
 	Hit
-	Raw     float64 `json:"raw"`     // bm25, negative, more negative is better
-	Penalty float64 `json:"penalty"` // referencePenalty, or 0
-	Final   float64 `json:"final"`   // Raw + Penalty; the sort key
+	rowID        int64   // SQLite identity within this read transaction; never exposed.
+	Raw          float64 `json:"raw"`
+	Penalty      float64 `json:"penalty"`
+	Boost        float64 `json:"boost"`
+	Final        float64 `json:"final"`
+	Coverage     float64 `json:"coverage"`
+	OrderedPairs float64 `json:"ordered_pairs"`
 	// Declares reports that this doc names one of the query's terms in
 	// its own idents frontmatter, which is what waives the penalty.
 	Declares   bool `json:"declares_query_term"`
@@ -147,18 +137,14 @@ type ScoredHit struct {
 	ExactIdentifier bool `json:"exact_identifier"`
 }
 
-// rank runs the whole ranking pipeline and returns every candidate it
-// considered, best first, alongside the FTS5 expression the question
-// became. QueryOpts pages it; Explain reports it. Both go through here
-// so the explanation can never drift from the answer.
+// rank returns every candidate, including its payload, for Explain. Normal
+// queries use the same candidate selection and scoring, then hydrate only their
+// final page. Both stages share one read transaction, including for local indexes.
 func rank(root, q string, opts QueryOptions) ([]ScoredHit, string, []string, error) {
-	return rankIndex(root, q, opts, true)
+	return rankIndexContext(context.Background(), root, q, opts, true, true)
 }
 
-func rankIndex(root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, string, []string, error) {
-	return rankIndexContext(context.Background(), root, q, opts, refresh)
-}
-func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, refresh bool) ([]ScoredHit, string, []string, error) {
+func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, refresh, hydrateAll bool) ([]ScoredHit, string, []string, error) {
 	var warnings []string
 	if refresh {
 		warnings = EnsureFresh(root)
@@ -176,9 +162,14 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		return nil, match, warnings, err
 	}
 	defer db.Close()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, match, warnings, err
+	}
+	defer tx.Rollback()
 	if !refresh {
 		var version string
-		if err := indexdb.ReadRow(ctx, db, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&version); err != nil {
+		if err := indexdb.ReadRow(ctx, tx, `SELECT value FROM indexmeta WHERE key = 'format'`).Scan(&version); err != nil {
 			return nil, match, warnings, err
 		}
 		if version != indexFormatVersion {
@@ -188,6 +179,20 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 	if opts.Limit <= 0 {
 		opts.Limit = 8
 	}
+	all, err := rankCandidates(ctx, tx, q, match, opts)
+	if err != nil {
+		return nil, match, warnings, err
+	}
+	if !hydrateAll {
+		all = all[:min(opts.Limit, len(all))]
+	}
+	if err := hydrateCandidates(ctx, tx, match, all); err != nil {
+		return nil, match, warnings, err
+	}
+	return all, match, warnings, nil
+}
+
+func rankCandidates(ctx context.Context, tx *sql.Tx, q, match string, opts QueryOptions) ([]ScoredHit, error) {
 	// bm25() returns negative scores (more negative = better), so the
 	// ascending ORDER BY is correct; pinned in TestBM25WeightBehavior.
 	// More candidates than the page are fetched so the Go-side
@@ -221,26 +226,19 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		fetch = rerankFetchMin
 	}
 	args = append(args, fetch)
-	// Sort narrow candidate records before fetching metadata and computing
-	// snippets. Keep the selection and hydration in one SQLite snapshot.
+	// Fetch only fields used by the ranker. Snippets and full metadata are
+	// loaded after the final order and page are known, in this same snapshot.
 	q1 += `)
-		SELECT docs.path, docs.title, docs.status, docs.kind, docs.grade,
-		       snippet(docs, 1, '«', '»', '…', 40),
-		       COALESCE(docmeta.evidence, ''),
-		       COALESCE(docmeta.idents, ''),
-		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
-		       COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''),
-		       COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, ''),
+		SELECT candidates.candidate_rowid, docs.title, docs.status, docs.kind,
+		       COALESCE(docmeta.idents, ''), docs.idents,
 		       candidates.score, candidates.exact_identifier
 		FROM candidates JOIN docs ON docs.rowid = candidates.candidate_rowid
 		LEFT JOIN docmeta ON docmeta.path = docs.path
-		WHERE docs MATCH ?
 		ORDER BY candidates.superseded ASC, candidates.exact_identifier DESC,
 		         candidates.score, candidates.candidate_rowid`
-	args = append(args, match)
-	rows, err := indexdb.ReadRows(ctx, db, q1, args...)
+	rows, err := indexdb.ReadRows(ctx, tx, q1, args...)
 	if err != nil {
-		return nil, match, warnings, fmt.Errorf("query failed: %w", err)
+		return nil, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 	queryTerms := map[string]bool{}
@@ -248,29 +246,23 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		queryTerms[strings.Trim(t, `"`)] = true
 	}
 	var all []ScoredHit
+	features := newFieldQuery(q)
 	for rows.Next() {
-		var h Hit
-		var evidence, declared string
-		var score float64
-		var exactIdentifier bool
-		if err := rows.Scan(&h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &declared, &h.Build, &h.TextDigest, &h.FindingID, &h.Fingerprint, &h.CreatedAt, &h.KnowledgeUpdatedAt, &score, &exactIdentifier); err != nil {
-			return nil, match, warnings, err
+		var s ScoredHit
+		var declared, indexedIdents string
+		if err := rows.Scan(&s.rowID, &s.Title, &s.Status, &s.Kind, &declared, &indexedIdents, &s.Raw, &s.ExactIdentifier); err != nil {
+			return nil, err
 		}
-		if evidence != "" {
-			h.Evidence = strings.Split(evidence, "\n")
-		}
-		s := ScoredHit{Hit: h, Raw: score, Final: score,
-			Declares: declaredIdentMatch(declared, queryTerms), Superseded: h.Status == "superseded",
-			ExactIdentifier: exactIdentifier}
-		if h.Kind == "reference" && !s.Declares {
-			s.Penalty = referencePenalty
-			s.Final = score + referencePenalty
-		}
+		s.Final = s.Raw
+		s.Declares = declaredIdentMatch(declared, queryTerms)
+		s.Superseded = s.Status == "superseded"
+		s.Coverage, s.OrderedPairs = features.match(s.Title, indexedIdents)
 		all = append(all, s)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, match, warnings, err
+		return nil, err
 	}
+	applyFieldRanking(all)
 	// Superseded-last stays the outermost sort key, exactly as in the
 	// SQL ORDER BY; the stable sort preserves bm25 order among ties.
 	sort.SliceStable(all, func(i, j int) bool {
@@ -282,7 +274,64 @@ func rankIndexContext(ctx context.Context, root, q string, opts QueryOptions, re
 		}
 		return all[i].Final < all[j].Final
 	})
-	return all, match, warnings, nil
+	return all, nil
+}
+
+// hydrateCandidates never changes ranking. Batching keeps Explain and large
+// internal pages below SQLite's parameter limit. The transaction pins the rowids,
+// metadata and highlighted body to the snapshot used for candidate selection.
+func hydrateCandidates(ctx context.Context, tx *sql.Tx, match string, ranked []ScoredHit) error {
+	const batchSize = 256
+	for offset := 0; offset < len(ranked); offset += batchSize {
+		batch := ranked[offset:min(offset+batchSize, len(ranked))]
+		args := []any{match}
+		byID := make(map[int64]*Hit, len(batch))
+		for i := range batch {
+			args = append(args, batch[i].rowID)
+			byID[batch[i].rowID] = &batch[i].Hit
+		}
+		query := `SELECT docs.rowid, docs.path, docs.title, docs.status, docs.kind, docs.grade,
+		       snippet(docs, 1, '«', '»', '…', 40),
+		       COALESCE(docmeta.evidence, ''),
+		       COALESCE(docmeta.build, ''), COALESCE(docmeta.text_digest, ''),
+		       COALESCE(docmeta.finding_id, ''), COALESCE(docmeta.fingerprint, ''),
+		       COALESCE(docmeta.created_at, ''), COALESCE(docmeta.knowledge_updated_at, '')
+		FROM docs LEFT JOIN docmeta ON docmeta.path = docs.path
+		WHERE docs MATCH ? AND docs.rowid IN (` + strings.TrimRight(strings.Repeat("?,", len(batch)), ",") + `)`
+		rows, err := indexdb.ReadRows(ctx, tx, query, args...)
+		if err != nil {
+			return fmt.Errorf("candidate payload: %w", err)
+		}
+		// Close each batch before starting another on the single connection.
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var h Hit
+				var id int64
+				var evidence string
+				if err := rows.Scan(&id, &h.Path, &h.Title, &h.Status, &h.Kind, &h.Grade, &h.Snippet, &evidence, &h.Build, &h.TextDigest, &h.FindingID, &h.Fingerprint, &h.CreatedAt, &h.KnowledgeUpdatedAt); err != nil {
+					return err
+				}
+				dest, ok := byID[id]
+				if !ok {
+					return fmt.Errorf("unexpected candidate payload row %d", id)
+				}
+				if evidence != "" {
+					h.Evidence = strings.Split(evidence, "\n")
+				}
+				*dest = h
+				delete(byID, id)
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return err
+		}
+		if len(byID) != 0 {
+			return fmt.Errorf("candidate payload missing from read snapshot")
+		}
+	}
+	return nil
 }
 
 // declaredIdentMatch reports whether any query term equals one of a

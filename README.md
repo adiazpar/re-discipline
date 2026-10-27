@@ -462,10 +462,14 @@ queries than it helped, and the largest single render is 642 lines.
 re-search explain --json "what stops a demon attacking"
 ```
 
-Every candidate comes back with its bm25 score, reference penalty, exact-name
-priority and resulting rank. An exact whole-name lookup favors the document
+Every candidate comes back with its BM25 score, reference penalty, title/identifier
+coverage and ordered-word boost, exact-name priority and resulting rank. An exact whole-name lookup favors the document
 that declares that identifier; broader questions retain relevance ranking.
 `re-search stats` prints the matching census and ranking rules in force.
+
+This branch combines experimental ranking signals with deferred snippet loading.
+See [the ranking experiment](retrieval/RANKING-EXPERIMENT.md) for its comparison
+against main, known regressions and load-test limits. It is not a release.
 
 Both run the same code paths as a real search -- `explain` calls the ranker
 `query` calls, not a reimplementation of it, and a test keeps the two orders
